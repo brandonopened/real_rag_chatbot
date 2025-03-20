@@ -4,6 +4,7 @@ from langchain_ollama import OllamaLLM
 from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from PyPDF2 import PdfReader
 import os
 import uuid
@@ -12,6 +13,8 @@ import shutil
 # Constants
 PERSIST_DIRECTORY = "./data/chroma_db"
 COLLECTION_NAME = "rag_documents"
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
 
 # --- File Processing ---
 def process_file(uploaded_file):
@@ -25,6 +28,16 @@ def process_file(uploaded_file):
         return None, None
     
     return content, uploaded_file.name
+
+# --- Text Splitting ---
+def split_text(text):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    return text_splitter.split_text(text)
 
 # --- Vector Store Setup ---
 def get_embeddings():
@@ -50,13 +63,17 @@ def add_document_to_vector_store(content, filename):
     # Get the existing vector store
     vector_store = get_or_create_vector_store()
     
-    # Add document to vector store
-    vector_store.add_texts(
-        texts=[content],
-        metadatas=[{"source": filename}]
-    )
+    # Split the text into chunks
+    chunks = split_text(content)
     
-    # Persistence is now handled automatically by Chroma
+    # Create metadata for each chunk
+    metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
+    
+    # Add chunks to vector store
+    vector_store.add_texts(
+        texts=chunks,
+        metadatas=metadatas
+    )
     
     return vector_store
 
@@ -85,17 +102,27 @@ def setup_rag_chain(vector_store):
     llm = OllamaLLM(model="llama3.1:latest")
     
     prompt_template = """
-    Answer the question based on the provided context. If asked, indicate the document source.
+    You are a specialized assistant that ONLY provides information based on the documents provided. 
+    
+    IMPORTANT RULES:
+    1. ONLY use the information in the provided context to answer the question.
+    2. If the context doesn't contain the information needed to answer the question, say "I don't have enough information in the provided documents to answer this question."
+    3. DO NOT use any external knowledge or make up information.
+    4. DO NOT hallucinate details that aren't explicitly in the context.
+    5. Always cite your source documents.
+    6. Provide direct quotes from the documents where possible.
+    
     Context: {context}
     Question: {question}
-    Answer:
+    
+    Answer (using ONLY information from the provided context):
     """
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),  # Retrieve from top 3 documents
+        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
         return_source_documents=True,
         chain_type_kwargs={"prompt": prompt}
     )
@@ -172,28 +199,45 @@ def main():
 
             # Get response
             with st.spinner("Thinking..."):
-                result = st.session_state.qa_chain.invoke({"query": prompt})  # Use invoke instead of call
+                result = st.session_state.qa_chain.invoke({"query": prompt})
                 answer = result["result"]
                 
                 # Get unique sources from retrieved documents
-                sources = []
+                source_details = []
                 for doc in result["source_documents"]:
                     source = doc.metadata.get("source", "Unknown")
-                    if source not in sources:
-                        sources.append(source)
+                    chunk = doc.metadata.get("chunk", "N/A")
+                    text_snippet = doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
+                    
+                    source_detail = {
+                        "source": source,
+                        "chunk": chunk,
+                        "snippet": text_snippet
+                    }
+                    
+                    if source_detail not in source_details:
+                        source_details.append(source_detail)
 
-                # Format source information
-                source_info = ", ".join(sources)
-
-                # Handle source request
-                if "which document" in prompt.lower() or "source" in prompt.lower():
-                    response = f"{answer}\n\n**Sources:** {source_info}"
+                # Format sources for display
+                source_info = ""
+                for i, detail in enumerate(source_details, 1):
+                    source_info += f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})\n"
+                
+                # Format final response
+                if "I don't have enough information" in answer:
+                    response = f"{answer}"
                 else:
-                    response = f"{answer}\n\n*(Sources: {source_info})*"
+                    response = f"{answer}\n\n---\n**Sources:**\n{source_info}"
 
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 with st.chat_message("assistant"):
                     st.markdown(response)
+                    
+                    # Add expandable section with source details
+                    with st.expander("View source details"):
+                        for i, detail in enumerate(source_details, 1):
+                            st.markdown(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
+                            st.text_area(f"Content snippet {i}", detail['snippet'], height=100, disabled=True)
 
 if __name__ == "__main__":
     main()
