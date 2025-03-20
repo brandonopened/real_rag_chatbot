@@ -1,0 +1,11 @@
+streamlit>=1.32.0
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-huggingface>=0.0.3
+langchain-ollama>=0.0.1
+langchain-chroma>=0.0.1
+chromadb>=0.6.0
+sentence-transformers>=2.2.0
+PyPDF2>=3.0.0
+uuid>=1.30 
