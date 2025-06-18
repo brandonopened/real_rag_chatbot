@@ -697,20 +697,25 @@ def main():
         with col1:
             if st.button("✅ Approve & Share", key="approve_pending", help="Approve this response and add it to the chat"):
                 response = f"{st.session_state.pending_response['answer']}"
-                
                 # Save the source details for feedback
                 sources = []
                 for i, detail in enumerate(st.session_state.pending_response['source_details'], 1):
                     sources.append(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
-                
+                # Find the last user question
+                question = None
+                for msg in reversed(st.session_state.messages):
+                    if msg["role"] == "user":
+                        question = msg["content"]
+                        break
+                # Save feedback as helpful
+                save_feedback(question, response, sources, True)
                 # Add to messages with source metadata
                 st.session_state.messages.append({
                     "role": "assistant", 
                     "content": response,
                     "sources": sources,
-                    "feedback_saved": False
+                    "feedback_saved": True
                 })
-                
                 st.success("Response approved and added to chat history!")
                 st.session_state.pending_response = None
                 st.rerun()
