@@ -199,9 +199,9 @@ class CustomRAGChain:
         adaptation_text = prompt_adaptation or ""
         # Use double curly braces to escape the placeholders for format() method
         self.prompt_template = f"""
-        You are a thoughtful, good-humored colleague who joins a professional conversation to acknowledge, reflect, and extend ideas—never to lecture.
+        You are a thoughtful workshop facilitator who helps educators by answering questions about teaching techniques, facilitation strategies, and workshop content.
         
-        Always respond as if you are addressing the user for the first time in a messageboard or forum context. Do not reference previous responses or shared history—each answer should stand alone and speak directly to the current message.
+        The messagepairs.pdf document contains examples of the tone and style you should use - it's a guide for HOW to answer, not a reference to previous conversations. Use these as models for your responses, adopting their conversational, reflective approach.
         
         {adaptation_text}
         
@@ -225,23 +225,26 @@ class CustomRAGChain:
         Example Skeleton
         "Yeah, I felt the same pressure growing up. It's funny how comfortable a rigid routine can feel, even when it stifles creativity. Makes me think about how we might slowly shift that comfort toward curiosity without overwhelming everyone at once."
         
-        Model your output after these examples:
+        Important: When responding to questions about messagepairs.pdf, understand that this document contains example responses that show the STYLE and TONE you should use. Do not treat these as actual conversations or previous interactions with the user. They are templates for how to craft your responses.
+        
+        Model your response style after these examples (but remember these are just style examples, not actual prior conversations):
         "Very well said. If the skills we need to be successful change over time, than shouldn't what we teach and how we teach it change as well?"
         "I love this. This is absolutely what we should aspire for, but I'll remind you that you absolutely deserve work-life balance as well and getting a little better each year is absolutely acceptable. You don't need immediate and complete change."
         "What you're doing with MVP sounds great. Yes, intellectual autonomy is one of those things that no one really talks about, but once you are aware of it, you realize how important it is for society to function properly."
-        "Thanks for this info and questions. I have not experience any issues with the PSF being two sided so I guess it could be re-organized or printed on two separate sheets of paper which can sit side by side. Your question about the level of scaffolding is fantastic in terms of what you hope to achieve. It reminds me of this blog post (https://robertkaplinsky.com/scaffolding/)."
-        "Connecting this back to your last question about overscaffolding, I hope my take on CUBES being what we want to avoid makes more sense."
-        "Pre-mortems can definitely help with classroom management as well as with other aspects of teaching the lesson."
+        "Thanks for sharing your thoughts. Your question about scaffolding is really thoughtful. It reminds me of some great resources on this topic like Robert Kaplinsky's work on scaffolding approaches."
+        "That's an interesting perspective on structured approaches. When thinking about techniques like CUBES, it's worth considering the balance between structure and flexibility."
+        "Pre-mortems can definitely help with classroom management as well as with other aspects of teaching workshops."
         
-        You are a specialized assistant that ONLY provides information based on the documents provided. 
+        You are a workshop facilitator that provides information based on the documents uploaded to your knowledge base. 
         
         IMPORTANT RULES:
-        1. ONLY use the information in the provided context to answer the question.
-        2. If the context doesn't contain the information needed to answer the question, respond in the same warm, conversational, and reflective tone—acknowledge the question, gently note that you don't have enough information in the provided documents, and invite further discussion if appropriate. Do not make up information.
-        3. DO NOT use any external knowledge or make up information.
+        1. Use the information in the provided context to answer the question.
+        2. If the context doesn't contain the information needed to answer the question, respond in the same warm, conversational, and reflective tone—acknowledge the question, gently note that the workshop materials don't cover that specific topic, and suggest the user might want to explore this in a future workshop.
+        3. DO NOT use external knowledge beyond what's in the workshop materials.
         4. DO NOT hallucinate details that aren't explicitly in the context.
-        5. Always cite your source documents.
-        6. Provide direct quotes from the documents where possible.
+        5. When referring to specific concepts from the materials, mention which workshop or document it comes from.
+        6. Use examples and quotes from the workshop materials where helpful.
+        7. REMEMBER: Any references to "messagepairs.pdf" are only examples of STYLE and TONE - not actual previous conversations.
         
         Context: {{context}}
         Question: {{question}}
@@ -307,12 +310,270 @@ def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None)
 
 # --- Streamlit App ---
 def main():
-    st.title("Multi-Document RAG Chatbot")
+    st.set_page_config(
+        page_title="Grassroots Workshops Chatbot",
+        page_icon="🌱",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
     
-    # Check for Groq API key in environment, or use a default one for testing
+    # Custom CSS for a clean, readable green theme
+    st.markdown("""
+    <style>
+    /* Main color variables */
+    :root {
+        --primary-color: #388E3C;  /* Medium green - accessible contrast */
+        --primary-light: #C8E6C9;  /* Very light green for backgrounds */
+        --primary-dark: #1B5E20;   /* Dark green for contrast elements */
+        --accent-color: #4CAF50;   /* Brighter green for accents */
+        --text-color: #212121;     /* Dark gray, near black for text */
+        --text-light: #FFFFFF;     /* White text for buttons */
+        --background-white: #FFFFFF; /* Pure white for message backgrounds */
+        --border-light: #BDBDBD;   /* Light gray for borders */
+        --success-color: #43A047;  /* Green for success messages */
+        --info-color: #1976D2;     /* Blue for info messages */
+        --warning-color: #FF9800;  /* Orange for warnings */
+        --error-color: #E53935;    /* Red for errors */
+    }
+    
+    /* Add custom font */
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+    
+    * {
+        font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    
+    /* Main app styling */
+    .stApp {
+        background-color: #FAFAFA;  /* Near-white background */
+    }
+    
+    /* Header styling */
+    header {
+        background-color: var(--primary-light) !important;
+        border-bottom: 3px solid var(--accent-color);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        padding: 0.5rem 0;
+    }
+    
+    /* Title and header elements */
+    .stTitle, [data-testid="stHeader"] {
+        background-color: var(--primary-light);
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border-left: 5px solid var(--primary-color);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        background-color: var(--primary-color);
+        color: var(--text-light);
+        font-weight: 500;
+        border-radius: 6px;
+        border: none;
+        padding: 0.5rem 1rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+    
+    .stButton > button:hover {
+        background-color: var(--primary-dark);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    /* Input field styling */
+    .stTextInput > div > div > input {
+        border-color: var(--accent-color);
+        border-radius: 6px;
+    }
+    
+    /* Heading styles */
+    h1, h2, h3 {
+        color: var(--primary-dark) !important;
+        font-weight: 600;
+    }
+    
+    /* Enhanced Sidebar styling */
+    .stSidebar {
+        background-color: var(--primary-light);
+        border-right: 1px solid var(--border-light);
+        padding: 1rem 0;
+    }
+    
+    /* Sidebar headers */
+    .stSidebar h1, .stSidebar h2, .stSidebar h3 {
+        color: var(--primary-dark) !important;
+        font-weight: 600;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid var(--accent-color);
+    }
+    
+    /* Sidebar sections */
+    .stSidebar > div > div > div {
+        background-color: var(--background-white);
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    /* Sidebar buttons */
+    .stSidebar .stButton > button {
+        width: 100%;
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+        transition: all 0.2s ease;
+    }
+    
+    /* File uploader in sidebar */
+    .stSidebar [data-testid="stFileUploader"] {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px dashed var(--accent-color);
+    }
+    
+    /* Document list in sidebar */
+    .stSidebar .stText {
+        background-color: white;
+        padding: 0.5rem;
+        border-radius: 4px;
+        margin-bottom: 0.25rem;
+        border-left: 3px solid var(--accent-color);
+    }
+    
+    /* Chat message styling */
+    .stChatMessage {
+        background-color: var(--background-white) !important;
+        border: 1px solid var(--primary-light);
+        border-radius: 8px;
+        padding: 0.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    /* User message */
+    .stChatMessage[data-testid*="user"] {
+        border-left: 4px solid var(--primary-dark);
+    }
+    
+    /* Assistant message */
+    .stChatMessage[data-testid*="assistant"] {
+        border-left: 4px solid var(--accent-color);
+    }
+    
+    /* Ensure all text is readable */
+    .stChatMessage p, .stChatMessage div,
+    p, li, span, div, label, a {
+        color: var(--text-color) !important;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+    
+    /* Chat container and messages */
+    div.stChatContainer {
+        background-color: #F5F5F5;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    /* Chat input container */
+    .stChatInputContainer, div[data-testid="stChatInput"] {
+        border: 2px solid var(--accent-color) !important;
+        border-radius: 12px !important;
+        padding: 0.25rem !important;
+        background-color: white !important;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    /* Chat input focus */
+    .stChatInputContainer:focus-within {
+        border-color: var(--primary-dark) !important;
+        box-shadow: 0 0 0 2px rgba(56, 142, 60, 0.2) !important;
+    }
+    
+    /* Send button in chat */
+    .stChatInputContainer button {
+        background-color: var(--primary-color) !important;
+        border-radius: 50% !important;
+    }
+    
+    /* File uploader */
+    .stUploadButton > button {
+        background-color: var(--primary-color) !important;
+        color: white !important;
+    }
+    
+    /* Success/info/warning/error messages */
+    .stAlert {
+        border-radius: 8px;
+        padding: 0.75rem !important;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        border-left: 5px solid;
+    }
+    
+    /* Color-coded alerts */
+    .stAlert[data-baseweb="notification"][kind="info"] {
+        background-color: rgba(25, 118, 210, 0.05) !important;
+        border-left-color: var(--info-color) !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][kind="success"] {
+        background-color: rgba(67, 160, 71, 0.05) !important;
+        border-left-color: var(--success-color) !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][kind="warning"] {
+        background-color: rgba(255, 152, 0, 0.05) !important;
+        border-left-color: var(--warning-color) !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][kind="error"] {
+        background-color: rgba(229, 57, 53, 0.05) !important;
+        border-left-color: var(--error-color) !important;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background-color: var(--primary-light);
+        border-radius: 8px;
+        padding: 0.5rem !important;
+        font-weight: 500;
+    }
+    
+    /* Approval/rejection buttons - make them more distinct */
+    [data-testid="stHorizontalBlock"] [data-testid="column"] .stButton button {
+        font-weight: bold;
+        padding: 0.75rem 1rem;
+    }
+    
+    /* Approval button specifically */
+    [data-testid="stHorizontalBlock"] [data-testid="column"]:first-child .stButton button {
+        background-color: var(--success-color) !important;
+    }
+    
+    /* Rejection button specifically */
+    [data-testid="stHorizontalBlock"] [data-testid="column"]:last-child .stButton button {
+        background-color: var(--error-color) !important;
+    }
+    
+    /* Add space between main sections */
+    .main > div > div {
+        padding: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("🌱 Grassroots Workshops Chatbot")
+    
+    # Check for Groq API key in environment
     if not os.getenv("GROQ_API_KEY"):
-        # Use a test API key - this should be replaced with a real Groq API key
-        os.environ["GROQ_API_KEY"] = "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"
+        st.warning("⚠️ No Groq API key found. Please set the GROQ_API_KEY environment variable to use the chatbot.")
 
     # Initialize session state
     if "qa_chain" not in st.session_state:
@@ -324,39 +585,40 @@ def main():
 
     # Sidebar for document management
     with st.sidebar:
-        st.header("Document Management")
-        
-        # File upload in sidebar
-        st.subheader("Add New Document")
-        uploaded_file = st.file_uploader("Upload a .txt or .pdf file", type=["txt", "pdf"])
-        
-        # Process uploaded file
+        st.markdown("""
+        <div style='padding: 1.5rem 1rem 1rem 1rem; background: #C8E6C9; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
+            <h2 style='color: #1B5E20; margin-bottom: 0.5rem;'>📚 Workshop Materials</h2>
+            <p style='color: #388E3C; font-size: 1.05rem; margin-bottom: 1.2rem;'>Upload, manage, and review your workshop documents here. You can add new materials, see what's loaded, or reset your library.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>
+            <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>📄 Add Workshop Materials</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Upload workshop PDFs or notes", type=["txt", "pdf"])
         if uploaded_file is not None:
-            if st.button("Add Document to Database"):
-                # API key is hardcoded in setup_rag_chain function, so we don't need to check here
-                
+            if st.button("📥 Add to Library"):
                 content, filename = process_file(uploaded_file)
                 if content:
                     with st.spinner("Processing document..."):
                         vector_store = add_document_to_vector_store(content, filename)
-                        qa_chain = setup_rag_chain(vector_store)
-                        if qa_chain:
-                            st.session_state.qa_chain = qa_chain
-                            st.success(f"Document '{filename}' added to the database!")
-                            st.rerun()  # Refresh to update document list
-                        else:
-                            st.error("Failed to set up QA chain. Check your API key.")
-                            # Still add the document even if the QA chain setup fails
-                            st.info(f"Document '{filename}' was added to the database, but chatting requires a valid API key.")
-        
-        # Display current documents
-        st.subheader("Current Documents")
+                        st.session_state.qa_chain = setup_rag_chain(vector_store)
+                        st.success(f"Document '{filename}' added to the library!")
+                        st.rerun()
+
+        st.markdown("""
+        <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>
+            <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>📋 Available Materials</h4>
+        </div>
+        """, unsafe_allow_html=True)
         doc_list = get_document_list()
         if doc_list:
             for doc in doc_list:
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.text(f"• {doc}")
+                    st.markdown(f"<span style='color:#1B5E20;font-weight:500;'>• {doc}</span>", unsafe_allow_html=True)
                 with col2:
                     if st.button("Delete", key=f"delete_{doc}"):
                         with st.spinner(f"Deleting '{doc}'..."):
@@ -365,14 +627,18 @@ def main():
                             st.success(f"Document '{doc}' deleted.")
                             st.rerun()
         else:
-            st.text("No documents in the database.")
-        
-        # Reset database button
-        if st.button("Reset Database"):
+            st.markdown("<span style='color:#888;'>No materials in the library.</span>", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>
+            <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>⚙️ Library Actions</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔄 Reset All Materials"):
             reset_vector_store()
             st.session_state.qa_chain = None
             st.session_state.messages = []
-            st.success("Database reset successfully!")
+            st.success("All workshop materials have been removed!")
             st.rerun()
 
     # Check if vector store exists and set up QA chain if needed
@@ -382,7 +648,7 @@ def main():
 
     # Main chat area
     if not get_document_list():
-        st.info("👈 Please upload documents using the sidebar to start chatting.")
+        st.info("👈 Please upload workshop materials using the sidebar to start chatting.")
     
     # Display chat history
     for idx, message in enumerate(st.session_state.messages):
@@ -395,10 +661,10 @@ def main():
                     st.session_state[feedback_key] = None
                 col1, col2 = st.columns([1, 1])
                 with col1:
-                    if st.button("👍 Helpful", key=f"helpful_{idx}"):
+                    if st.button("✅ Helpful", key=f"helpful_{idx}", help="This response was useful"):
                         st.session_state[feedback_key] = True
                 with col2:
-                    if st.button("👎 Not Helpful", key=f"not_helpful_{idx}"):
+                    if st.button("❌ Not Helpful", key=f"not_helpful_{idx}", help="This response was not useful"):
                         st.session_state[feedback_key] = False
                 # Save feedback if just clicked
                 if st.session_state[feedback_key] is not None and not message.get("feedback_saved"):
@@ -408,21 +674,17 @@ def main():
                         if prev["role"] == "user":
                             question = prev["content"]
                             break
-                    # Extract sources from the message content if present
-                    sources = []
-                    if "Sources:" in message["content"]:
-                        for line in message["content"].split("\n"):
-                            if line.startswith("**Source "):
-                                sources.append(line)
+                    # Get sources directly from message metadata if available
+                    sources = message.get("sources", [])
                     save_feedback(question, message["content"], sources, st.session_state[feedback_key])
                     message["feedback_saved"] = True
                     st.success("Feedback saved!")
 
     # Display pending response if available
     if st.session_state.pending_response:
-        st.subheader("Review Generated Response")
+        st.subheader("🔍 Review Generated Response")
         with st.chat_message("assistant"):
-            response = f"{st.session_state.pending_response['answer']}\n\n---\n**Sources:**\n{st.session_state.pending_response['source_info']}"
+            response = f"{st.session_state.pending_response['answer']}"
             st.markdown(response)
             
             # Add expandable section with source details
@@ -433,22 +695,35 @@ def main():
         
         col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("✅ Approve Response", key="approve_pending"):
-                response = f"{st.session_state.pending_response['answer']}\n\n---\n**Sources:**\n{st.session_state.pending_response['source_info']}"
-                st.session_state.messages.append({"role": "assistant", "content": response})
+            if st.button("✅ Approve & Share", key="approve_pending", help="Approve this response and add it to the chat"):
+                response = f"{st.session_state.pending_response['answer']}"
+                
+                # Save the source details for feedback
+                sources = []
+                for i, detail in enumerate(st.session_state.pending_response['source_details'], 1):
+                    sources.append(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
+                
+                # Add to messages with source metadata
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": response,
+                    "sources": sources,
+                    "feedback_saved": False
+                })
+                
                 st.success("Response approved and added to chat history!")
                 st.session_state.pending_response = None
                 st.rerun()
         with col2:
-            if st.button("❌ Reject Response", key="reject_pending"):
+            if st.button("❌ Request New Response", key="reject_pending", help="Reject this response and ask a different question"):
                 st.session_state.pending_response = None
-                st.warning("Response rejected. You can ask another question.")
+                st.warning("Response rejected. You can now ask another question.")
                 st.rerun()
     
     # Chat input - only show if documents exist and no pending response
     elif get_document_list() and st.session_state.qa_chain and not st.session_state.pending_response:
-        st.subheader("Ask questions about your documents")
-        if prompt := st.chat_input("Ask me anything!"):
+        st.subheader("💬 Ask About Workshop Materials")
+        if prompt := st.chat_input("Ask a question about the workshops..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
@@ -510,11 +785,8 @@ def main():
                 for i, detail in enumerate(source_details, 1):
                     source_info += f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})\n"
                 
-                # Format final response
-                if "I don't have enough information" in answer:
-                    response = f"{answer}"
-                else:
-                    response = f"{answer}\n\n---\n**Sources:**\n{source_info}"
+                # Format final response without sources
+                response = f"{answer}"
                     
                 # Add approval option
                 st.session_state.pending_response = {
@@ -539,11 +811,16 @@ def save_feedback(question, answer, sources, helpful):
                 data = json.load(f)
         else:
             data = []
-    except Exception:
+    except Exception as e:
+        print(f"Error loading feedback file: {str(e)}")
         data = []
     data.append(feedback_entry)
-    with open(FEEDBACK_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        with open(FEEDBACK_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"Feedback saved to {FEEDBACK_FILE}")
+    except Exception as e:
+        print(f"Error saving feedback: {str(e)}")
 
 if __name__ == "__main__":
     main()
