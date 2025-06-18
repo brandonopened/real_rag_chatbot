@@ -126,6 +126,24 @@ def question_similarity(q1, q2):
     emb2 = EMBED_MODEL.encode([q2])[0]
     return float(np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2)))
 
+class GroqLLM:
+    def __init__(self, model="qwen-qwq-32b", api_key=None, temperature=0.6, max_tokens=4096, top_p=0.95):
+        self.model = model
+        # Only set the API key in the environment, do not store as attribute
+        api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not api_key:
+            st.error("GROQ_API_KEY environment variable is not set. Please set it in your environment.")
+            raise RuntimeError("GROQ_API_KEY environment variable is not set.")
+        os.environ["GROQ_API_KEY"] = api_key
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.top_p = top_p
+        os.environ.pop("HTTP_PROXY", None)
+        os.environ.pop("HTTPS_PROXY", None)
+        os.environ.pop("http_proxy", None)
+        os.environ.pop("https_proxy", None)
+        self.client = Groq()
+
 class SimpleGroqAPI:
     """Simple class to interact with the Groq API."""
     
