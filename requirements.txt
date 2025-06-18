@@ -9,4 +9,5 @@ langchain-text-splitters>=0.0.1
 chromadb>=0.6.0
 sentence-transformers>=2.2.0
 PyPDF2>=3.0.0
-uuid>=1.30 
+uuid>=1.30
+requests>=2.28.0

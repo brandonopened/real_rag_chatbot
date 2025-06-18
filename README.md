@@ -9,12 +9,14 @@ A Retrieval-Augmented Generation (RAG) chatbot that allows you to upload and que
 - Query across all uploaded documents simultaneously
 - Chat interface with conversation history
 - Document source tracking for answers
-- Local processing using Ollama (no data sent to external services)
+- Feedback mechanism for improving responses
+- Uses Groq API for fast, high-quality responses
 
 ## Prerequisites
 
 1. **Python 3.9+** installed on your system
-2. **Ollama** installed with Llama 3.1 model (see [Ollama installation instructions](#installing-ollama))
+2. **Groq API Key** (get one from [Groq Console](https://console.groq.com/keys))
+3. ~~**Ollama** installed with Llama 3.1 model~~ (no longer needed, the app now uses Groq API)
 
 ## Installation
 
@@ -35,13 +37,24 @@ A Retrieval-Augmented Generation (RAG) chatbot that allows you to upload and que
    pip install -r requirements.txt
    ```
 
+4. Get a Groq API key:
+   - Create an account at [console.groq.com](https://console.groq.com)
+   - Navigate to the API Keys section and create a new API key
+   - Keep this key secure - you'll need it to run the application
+
 ## Running the Application
 
-1. Make sure Ollama is running with the Llama 3.1 model:
+1. Set your Groq API key as an environment variable:
    ```bash
-   ollama run llama3.1
+   # On Linux/macOS
+   export GROQ_API_KEY="your-api-key-here"
+   
+   # On Windows (Command Prompt)
+   set GROQ_API_KEY=your-api-key-here
+   
+   # On Windows (PowerShell)
+   $env:GROQ_API_KEY="your-api-key-here"
    ```
-   You can keep this running in a separate terminal.
 
 2. Start the Streamlit application:
    ```bash
@@ -79,20 +92,17 @@ This application uses a RAG (Retrieval-Augmented Generation) architecture:
    - When you ask a question, it's converted to the same vector space
    - The system finds the most similar document chunks to your question
    - Top matching chunks are retrieved as context
+   - The system uses feedback history to boost or penalize certain sources
 
 3. **Generation**:
-   - Retrieved context is sent to the Llama 3.1 LLM along with your question
+   - Retrieved context is sent to the Groq API along with your question
    - The LLM generates a response based on the retrieved context
    - Source documents are tracked and displayed with the answer
 
-## Installing Ollama
-
-1. Visit [ollama.com](https://ollama.com/) and download the installer for your platform
-2. Install Ollama following the platform-specific instructions
-3. Pull the Llama 3.1 model:
-   ```bash
-   ollama pull llama3.1
-   ```
+4. **Feedback Loop**:
+   - Users can provide feedback on responses (helpful/not helpful)
+   - This feedback influences future retrieval, boosting helpful sources
+   - The system adapts the prompt based on feedback patterns
 
 ## Customization
 
@@ -103,9 +113,10 @@ You can modify the code to:
 
 ## Troubleshooting
 
-- **Ollama Connection Issues**: Ensure Ollama is running on the default port (localhost:11434)
-- **Missing Models**: Run `ollama list` to check installed models, and `ollama pull llama3.1` if needed
+- **API Key Issues**: Ensure your Groq API key is correctly set as an environment variable
+- **No API Key Warning**: The application will display a warning if no API key is found
 - **Memory Issues**: For large documents, you may need to increase your system's RAM or reduce the chunk size
+- **Model Availability**: If a specific model is unavailable, try changing to a different Groq model in the code
 
 ## License
 
