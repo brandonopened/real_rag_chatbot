@@ -393,6 +393,8 @@ def main():
         border: none;
         padding: 0.5rem 1rem;
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        width: 100%;
+        margin: 0.25rem 0;
     }
     
     .stButton > button:hover {
@@ -404,6 +406,8 @@ def main():
     .stTextInput > div > div > input {
         border-color: var(--accent-color);
         border-radius: 6px;
+        color: var(--text-color) !important;
+        background-color: var(--background-white) !important;
     }
     
     /* Heading styles */
@@ -416,17 +420,19 @@ def main():
     .stSidebar {
         background-color: var(--primary-light);
         border-right: 1px solid var(--border-light);
-        padding: 1rem 0;
+        padding: 1rem;
+        min-width: 300px !important;
     }
     
     /* Sidebar headers */
     .stSidebar h1, .stSidebar h2, .stSidebar h3 {
         color: var(--primary-dark) !important;
         font-weight: 600;
-        margin-top: 1.5rem;
-        margin-bottom: 1rem;
+        margin-top: 1rem;
+        margin-bottom: 0.75rem;
         padding-bottom: 0.5rem;
         border-bottom: 2px solid var(--accent-color);
+        font-size: 1.2rem;
     }
     
     /* Sidebar sections */
@@ -434,16 +440,8 @@ def main():
         background-color: var(--background-white);
         border-radius: 8px;
         margin-bottom: 1rem;
-        padding: 0.5rem;
+        padding: 1rem;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-    
-    /* Sidebar buttons */
-    .stSidebar .stButton > button {
-        width: 100%;
-        margin-top: 0.5rem;
-        margin-bottom: 0.5rem;
-        transition: all 0.2s ease;
     }
     
     /* File uploader in sidebar */
@@ -452,15 +450,18 @@ def main():
         padding: 1rem;
         border-radius: 8px;
         border: 1px dashed var(--accent-color);
+        margin-bottom: 1rem;
     }
     
     /* Document list in sidebar */
     .stSidebar .stText {
         background-color: white;
-        padding: 0.5rem;
+        padding: 0.75rem;
         border-radius: 4px;
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.5rem;
         border-left: 3px solid var(--accent-color);
+        font-size: 0.9rem;
+        color: var(--text-color) !important;
     }
     
     /* Chat message styling */
@@ -468,7 +469,7 @@ def main():
         background-color: var(--background-white) !important;
         border: 1px solid var(--primary-light);
         border-radius: 8px;
-        padding: 0.5rem;
+        padding: 1rem;
         margin-bottom: 1rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
@@ -476,6 +477,7 @@ def main():
     /* User message */
     .stChatMessage[data-testid*="user"] {
         border-left: 4px solid var(--primary-dark);
+        background-color: #F8F9FA !important;
     }
     
     /* Assistant message */
@@ -503,9 +505,19 @@ def main():
     .stChatInputContainer, div[data-testid="stChatInput"] {
         border: 2px solid var(--accent-color) !important;
         border-radius: 12px !important;
-        padding: 0.25rem !important;
+        padding: 0.5rem !important;
         background-color: white !important;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        margin-top: 1rem;
+    }
+    
+    /* Chat input text area */
+    .stChatInputContainer textarea {
+        color: var(--text-color) !important;
+        background-color: white !important;
+        font-size: 1rem !important;
+        line-height: 1.5 !important;
+        padding: 0.5rem !important;
     }
     
     /* Chat input focus */
@@ -518,6 +530,7 @@ def main():
     .stChatInputContainer button {
         background-color: var(--primary-color) !important;
         border-radius: 50% !important;
+        color: white !important;
     }
     
     /* File uploader */
