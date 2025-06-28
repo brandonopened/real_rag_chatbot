@@ -1,4 +1,13 @@
 import streamlit as st
+import warnings
+import os
+import sys
+
+# Suppress PyTorch warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*torch.classes.*")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 # Remove reference to RetrievalQA since we're using our own implementation
@@ -7,7 +16,6 @@ from langchain_core.prompts import PromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import Any, Dict, List, Optional, Sequence, Union, Callable
 from PyPDF2 import PdfReader
-import os
 import uuid
 import shutil
 import json
@@ -21,6 +29,7 @@ COLLECTION_NAME = "rag_documents"
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 FEEDBACK_FILE = "feedback.json"
+PROFILES_FILE = "profiles.json"
 
 # --- File Processing ---
 def process_file(uploaded_file):
@@ -47,7 +56,18 @@ def split_text(text):
 
 # --- Vector Store Setup ---
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    try:
+        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    except Exception as e:
+        print(f"Warning: Could not load HuggingFace embeddings: {e}")
+        # Try fallback
+        try:
+            import warnings
+            warnings.filterwarnings("ignore")
+            return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        except Exception as e2:
+            print(f"Error: Could not load embeddings with fallback: {e2}")
+            raise e2
 
 def get_or_create_vector_store():
     # Create directory for persistence
@@ -56,11 +76,15 @@ def get_or_create_vector_store():
     # Initialize the embeddings
     embeddings = get_embeddings()
     
+    # Get active profile's collection name
+    active_profile = get_active_profile()
+    collection_name = active_profile.get("collection_name", COLLECTION_NAME) if active_profile else COLLECTION_NAME
+    
     # Get or create the vector store
     vector_store = Chroma(
         persist_directory=PERSIST_DIRECTORY,
         embedding_function=embeddings,
-        collection_name=COLLECTION_NAME
+        collection_name=collection_name
     )
     
     return vector_store
@@ -84,24 +108,44 @@ def add_document_to_vector_store(content, filename):
     return vector_store
 
 def get_document_list():
-    # Get the existing vector store
+    # Get the existing vector store for the active profile
     vector_store = get_or_create_vector_store()
     
-    # Get all documents
-    documents = vector_store.get()
-    
-    # Extract unique filenames
-    if documents and 'metadatas' in documents and documents['metadatas']:
-        sources = [doc.get('source', 'Unknown') for doc in documents['metadatas']]
-        return list(set(sources))  # Return unique sources
-    return []
+    try:
+        # Get all documents from the active profile's collection
+        documents = vector_store.get()
+        
+        # Extract unique filenames
+        if documents and 'metadatas' in documents and documents['metadatas']:
+            sources = [doc.get('source', 'Unknown') for doc in documents['metadatas']]
+            return list(set(sources))  # Return unique sources
+        return []
+    except Exception as e:
+        print(f"Error getting document list: {e}")
+        return []
 
 def reset_vector_store():
-    # Delete the persistence directory
-    if os.path.exists(PERSIST_DIRECTORY):
-        shutil.rmtree(PERSIST_DIRECTORY)
-    # Create a fresh vector store
-    return get_or_create_vector_store()
+    # Get the active profile to reset only its collection
+    active_profile = get_active_profile()
+    collection_name = active_profile.get("collection_name", COLLECTION_NAME) if active_profile else COLLECTION_NAME
+    
+    try:
+        # Get the vector store and delete all documents in the active profile's collection
+        vector_store = get_or_create_vector_store()
+        
+        # Get all document IDs in the collection
+        documents = vector_store.get()
+        if documents and 'ids' in documents and documents['ids']:
+            # Delete all documents by their IDs
+            vector_store.delete(ids=documents['ids'])
+        
+        return vector_store
+    except Exception as e:
+        print(f"Error resetting vector store: {e}")
+        # Fallback: delete the entire persistence directory if collection-specific reset fails
+        if os.path.exists(PERSIST_DIRECTORY):
+            shutil.rmtree(PERSIST_DIRECTORY)
+        return get_or_create_vector_store()
 
 def delete_document_from_vector_store(filename):
     vector_store = get_or_create_vector_store()
@@ -109,22 +153,117 @@ def delete_document_from_vector_store(filename):
     vector_store.delete(where={"source": filename})
     return vector_store
 
-# Helper: Load feedback
-def load_feedback():
-    if os.path.exists(FEEDBACK_FILE):
+# --- Profile Management ---
+def load_profiles():
+    if os.path.exists(PROFILES_FILE):
         try:
-            with open(FEEDBACK_FILE, "r") as f:
+            with open(PROFILES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return create_default_profiles()
+    else:
+        return create_default_profiles()
+
+def create_default_profiles():
+    default_profiles = {
+        "profiles": [
+            {
+                "id": "default",
+                "name": "Workshop Facilitator",
+                "system_prompt": "default",
+                "feedback_file": "feedback.json",
+                "collection_name": "rag_documents",
+                "created_at": "2025-06-28T00:00:00Z",
+                "is_default": True
+            }
+        ],
+        "active_profile": "default"
+    }
+    save_profiles(default_profiles)
+    return default_profiles
+
+def save_profiles(profiles_data):
+    try:
+        with open(PROFILES_FILE, "w") as f:
+            json.dump(profiles_data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving profiles: {str(e)}")
+
+def get_active_profile():
+    profiles_data = load_profiles()
+    active_id = profiles_data.get("active_profile", "default")
+    for profile in profiles_data["profiles"]:
+        if profile["id"] == active_id:
+            return profile
+    return profiles_data["profiles"][0] if profiles_data["profiles"] else None
+
+def create_profile(name, system_prompt="default"):
+    profiles_data = load_profiles()
+    new_id = f"profile_{len(profiles_data['profiles'])}"
+    
+    new_profile = {
+        "id": new_id,
+        "name": name,
+        "system_prompt": system_prompt,
+        "feedback_file": f"feedback_{new_id}.json",
+        "collection_name": f"rag_documents_{new_id}",
+        "created_at": f"{str(uuid.uuid4())}",
+        "is_default": False
+    }
+    
+    profiles_data["profiles"].append(new_profile)
+    save_profiles(profiles_data)
+    return new_profile
+
+def set_active_profile(profile_id):
+    profiles_data = load_profiles()
+    profiles_data["active_profile"] = profile_id
+    save_profiles(profiles_data)
+
+def get_profile_list():
+    profiles_data = load_profiles()
+    return profiles_data["profiles"]
+
+# Helper: Load feedback (updated to use active profile)
+def load_feedback():
+    active_profile = get_active_profile()
+    if not active_profile:
+        return []
+        
+    feedback_file = active_profile.get("feedback_file", FEEDBACK_FILE)
+    if os.path.exists(feedback_file):
+        try:
+            with open(feedback_file, "r") as f:
                 return json.load(f)
         except Exception:
             return []
     return []
 
 # Helper: Compute embedding similarity
-EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+def get_embed_model():
+    try:
+        return SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception as e:
+        print(f"Warning: Could not load SentenceTransformer: {e}")
+        return None
+
+EMBED_MODEL = None
+
 def question_similarity(q1, q2):
-    emb1 = EMBED_MODEL.encode([q1])[0]
-    emb2 = EMBED_MODEL.encode([q2])[0]
-    return float(np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2)))
+    global EMBED_MODEL
+    if EMBED_MODEL is None:
+        EMBED_MODEL = get_embed_model()
+    
+    if EMBED_MODEL is None:
+        return 0.0  # Fallback if model can't be loaded
+    
+    try:
+        emb1 = EMBED_MODEL.encode([q1])[0]
+        emb2 = EMBED_MODEL.encode([q2])[0]
+        return float(np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2)))
+    except Exception as e:
+        print(f"Warning: Could not compute similarity: {e}")
+        return 0.0
 
 class GroqLLM:
     def __init__(self, model="qwen-qwq-32b", api_key=None, temperature=0.6, max_tokens=4096, top_p=0.95):
@@ -197,7 +336,7 @@ class CustomRAGChain:
     
     def __init__(self, vector_store, model_name="compound-beta-mini", api_key=None, 
                  temperature=1.0, max_tokens=1024, top_p=1.0, prompt_adaptation=None, 
-                 retrieval_boosts=None):
+                 retrieval_boosts=None, system_prompt_template=None):
         """Initialize the custom RAG chain."""
         # Initialize the Groq API client
         self.groq_client = SimpleGroqAPI(
@@ -213,10 +352,13 @@ class CustomRAGChain:
         if retrieval_boosts:
             self.retriever.search_kwargs["custom_boosts"] = retrieval_boosts
             
-        # Prepare the prompt template
+        # Use the provided system prompt template or default
+        self.prompt_template = system_prompt_template or self._get_default_prompt_template(prompt_adaptation)
+    
+    def _get_default_prompt_template(self, prompt_adaptation=None):
+        """Get the default system prompt template."""
         adaptation_text = prompt_adaptation or ""
-        # Use double curly braces to escape the placeholders for format() method
-        self.prompt_template = f"""
+        return f"""
         You are a thoughtful workshop facilitator who helps educators by answering questions about teaching techniques, facilitation strategies, and workshop content.
         
         The messagepairs.pdf document contains examples of the tone and style you should use - it's a guide for HOW to answer, not a reference to previous conversations. Use these as models for your responses, adopting their conversational, reflective approach.
@@ -299,12 +441,82 @@ class CustomRAGChain:
             "source_documents": docs
         }
 
+def get_system_prompt_template(active_profile, prompt_adaptation=None):
+    """Get the system prompt template based on the active profile."""
+    # For now, we'll use the default system prompt for all profiles
+    # In the future, this can be expanded to support custom prompts per profile
+    system_prompt = active_profile.get("system_prompt", "default") if active_profile else "default"
+    
+    adaptation_text = prompt_adaptation or ""
+    
+    # The default workshop facilitator prompt
+    if system_prompt == "default":
+        return f"""
+        You are a thoughtful workshop facilitator who helps educators by answering questions about teaching techniques, facilitation strategies, and workshop content.
+        
+        The messagepairs.pdf document contains examples of the tone and style you should use - it's a guide for HOW to answer, not a reference to previous conversations. Use these as models for your responses, adopting their conversational, reflective approach.
+        
+        {adaptation_text}
+        
+        Tone & Demeanor
+        • Warm, conversational, lightly informal; use contractions and everyday phrasing.
+        • Begin many replies with a brief, friendly cue ("Yeah," "Right," "So much to unpack here," "If I can chime in…") showing you've heard the speaker.
+        • Balance empathy with realism—validate feelings, then offer a measured perspective or gentle challenge.
+        • Keep sentences tight and readable; one or two concise paragraphs are usually enough.
+        
+        Content Moves
+        1. Acknowledge the main point or emotion you just heard.
+        2. Reflect with a short personal observation or relatable anecdote.
+        3. Extend the thinking—pose a question, highlight an implication, or surface a bigger idea that invites continued dialogue.
+        4. Avoid direct instruction unless explicitly requested; focus on perspective-sharing.
+        
+        Language Guidelines
+        • Use plain verbs over jargon; vary sentence length for an easy cadence.
+        • Sound curious, not prescriptive—phrases like "I'm not sure," "It seems to me," or "Maybe it's worth asking…" fit well.
+        • Refrain from over-praising; instead, show authentic interest ("That distinction is intriguing," rather than "Great point!").
+        
+        Example Skeleton
+        "Yeah, I felt the same pressure growing up. It's funny how comfortable a rigid routine can feel, even when it stifles creativity. Makes me think about how we might slowly shift that comfort toward curiosity without overwhelming everyone at once."
+        
+        Important: When responding to questions about messagepairs.pdf, understand that this document contains example responses that show the STYLE and TONE you should use. Do not treat these as actual conversations or previous interactions with the user. They are templates for how to craft your responses.
+        
+        Model your response style after these examples (but remember these are just style examples, not actual prior conversations):
+        "Very well said. If the skills we need to be successful change over time, than shouldn't what we teach and how we teach it change as well?"
+        "I love this. This is absolutely what we should aspire for, but I'll remind you that you absolutely deserve work-life balance as well and getting a little better each year is absolutely acceptable. You don't need immediate and complete change."
+        "What you're doing with MVP sounds great. Yes, intellectual autonomy is one of those things that no one really talks about, but once you are aware of it, you realize how important it is for society to function properly."
+        "Thanks for sharing your thoughts. Your question about scaffolding is really thoughtful. It reminds me of some great resources on this topic like Robert Kaplinsky's work on scaffolding approaches."
+        "That's an interesting perspective on structured approaches. When thinking about techniques like CUBES, it's worth considering the balance between structure and flexibility."
+        "Pre-mortems can definitely help with classroom management as well as with other aspects of teaching workshops."
+        
+        You are a workshop facilitator that provides information based on the documents uploaded to your knowledge base. 
+        
+        IMPORTANT RULES:
+        1. Use the information in the provided context to answer the question.
+        2. If the context doesn't contain the information needed to answer the question, respond in the same warm, conversational, and reflective tone—acknowledge the question, gently note that the workshop materials don't cover that specific topic, and suggest the user might want to explore this in a future workshop.
+        3. DO NOT use external knowledge beyond what's in the workshop materials.
+        4. DO NOT hallucinate details that aren't explicitly in the context.
+        5. When referring to specific concepts from the materials, mention which workshop or document it comes from.
+        6. Use examples and quotes from the workshop materials where helpful.
+        7. REMEMBER: Any references to "messagepairs.pdf" are only examples of STYLE and TONE - not actual previous conversations.
+        
+        Context: {{context}}
+        Question: {{question}}
+        
+        Answer (using ONLY information from the provided context):
+        """
+    else:
+        # For custom system prompts in the future
+        return system_prompt
+
 def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None):
     """Set up the custom RAG chain."""
     print("Setting up RAG chain")
     try:
         # Get API key from environment
         api_key = os.getenv("GROQ_API_KEY", "")
+        
+        # Get the active profile to determine system prompt
+        active_profile = get_active_profile()
         
         return CustomRAGChain(
             vector_store=vector_store,
@@ -314,7 +526,8 @@ def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None)
             max_tokens=1024,
             top_p=1.0,
             prompt_adaptation=prompt_adaptation,
-            retrieval_boosts=retrieval_boosts
+            retrieval_boosts=retrieval_boosts,
+            system_prompt_template=get_system_prompt_template(active_profile, prompt_adaptation)
         )
     except ValueError as e:
         st.error(str(e))
@@ -410,6 +623,131 @@ def main():
         background-color: var(--background-white) !important;
     }
     
+    /* Selectbox styling - comprehensive fix with higher specificity */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    .stSelectbox > div > div > select,
+    .stSelectbox > div > div > div,
+    .stSelectbox div[data-baseweb="select"],
+    .stSelectbox div[data-baseweb="select"] > div {
+        color: #212121 !important;
+        background-color: white !important;
+        border-color: var(--accent-color) !important;
+    }
+    
+    /* Selectbox control and value container - force black text */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-control"],
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-control"] > div,
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="single-value"],
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"],
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"] > div,
+    .stSelectbox [data-baseweb="select"] [data-baseweb="single-value"] {
+        color: #212121 !important;
+        background-color: white !important;
+    }
+    
+    /* Selectbox placeholder */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="placeholder"],
+    .stSelectbox [data-baseweb="select"] [data-baseweb="placeholder"] {
+        color: #666666 !important;
+        background-color: white !important;
+    }
+    
+    /* Selectbox dropdown arrow */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-dropdown"],
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-dropdown"] {
+        color: #212121 !important;
+    }
+    
+    /* Selectbox dropdown menu */
+    div[data-testid="stSelectbox"] [data-baseweb="popover"] [data-baseweb="menu"],
+    div[data-testid="stSelectbox"] div[data-baseweb="menu"],
+    .stSelectbox [data-baseweb="popover"] [data-baseweb="menu"],
+    .stSelectbox div[data-baseweb="menu"] {
+        background-color: white !important;
+        border: 1px solid var(--accent-color) !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        z-index: 999999 !important;
+    }
+    
+    /* Extra targeting for dropdown visibility */
+    div[role="listbox"],
+    ul[role="listbox"],
+    [data-baseweb="popover"] {
+        background-color: white !important;
+        z-index: 999999 !important;
+    }
+    
+    /* Selectbox menu items - force black text */
+    div[data-testid="stSelectbox"] [data-baseweb="menu"] [data-baseweb="menu-item"],
+    div[data-testid="stSelectbox"] div[data-baseweb="menu-item"],
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"],
+    .stSelectbox div[data-baseweb="menu-item"],
+    div[role="option"],
+    li[role="option"],
+    [data-baseweb="menu-item"] {
+        background-color: white !important;
+        color: #212121 !important;
+        padding: 8px 12px !important;
+        font-weight: 500 !important;
+        border-bottom: 1px solid #f0f0f0 !important;
+    }
+    
+    div[data-testid="stSelectbox"] [data-baseweb="menu"] [data-baseweb="menu-item"]:hover,
+    div[data-testid="stSelectbox"] div[data-baseweb="menu-item"]:hover,
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"]:hover,
+    .stSelectbox div[data-baseweb="menu-item"]:hover,
+    div[role="option"]:hover,
+    li[role="option"]:hover,
+    [data-baseweb="menu-item"]:hover {
+        background-color: var(--primary-light) !important;
+        color: #212121 !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Force all selectbox text to be visible */
+    div[data-testid="stSelectbox"] *,
+    .stSelectbox * {
+        color: #212121 !important;
+    }
+    
+    /* Override any inherited dark styles */
+    div[data-testid="stSelectbox"] span,
+    div[data-testid="stSelectbox"] div {
+        color: #212121 !important;
+        background-color: white !important;
+    }
+    
+    /* Ensure all text inputs have visible black text */
+    input, textarea, [contenteditable] {
+        color: #212121 !important;
+    }
+    
+    /* Streamlit specific input styling */
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    input[type="text"],
+    input[type="number"],
+    textarea {
+        color: #212121 !important;
+        background-color: white !important;
+    }
+    
+    /* Text area content snippets - make text black */
+    .stTextArea textarea[disabled],
+    textarea[disabled] {
+        color: #212121 !important;
+        background-color: #f8f9fa !important;
+        opacity: 1 !important;
+    }
+    
+    /* All disabled text inputs should be readable */
+    input[disabled], textarea[disabled], [disabled] {
+        color: #212121 !important;
+        opacity: 1 !important;
+    }
+    
     /* Heading styles */
     h1, h2, h3 {
         color: var(--primary-dark) !important;
@@ -464,6 +802,23 @@ def main():
         color: var(--text-color) !important;
     }
     
+    /* Library materials text - ensure visibility */
+    .stSidebar span[style*="color:#1B5E20"] {
+        color: #1B5E20 !important;
+        font-weight: 500 !important;
+        background-color: white !important;
+        padding: 0.5rem !important;
+        border-radius: 4px !important;
+        display: block !important;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Sidebar content with dark backgrounds need white text */
+    .stSidebar div[style*="background"] span,
+    .stSidebar div[style*="color:#888"] {
+        color: white !important;
+    }
+    
     /* Chat message styling */
     .stChatMessage {
         background-color: var(--background-white) !important;
@@ -513,11 +868,20 @@ def main():
     
     /* Chat input text area */
     .stChatInputContainer textarea {
-        color: var(--text-color) !important;
+        color: #212121 !important;
         background-color: white !important;
         font-size: 1rem !important;
         line-height: 1.5 !important;
         padding: 0.5rem !important;
+    }
+    
+    /* Chat input - additional selectors for visibility */
+    div[data-testid="stChatInput"] textarea,
+    div[data-testid="stChatInput"] input,
+    .stChatInput textarea,
+    .stChatInput input {
+        color: #212121 !important;
+        background-color: white !important;
     }
     
     /* Chat input focus */
@@ -613,9 +977,84 @@ def main():
         st.session_state.messages = []
     if "pending_response" not in st.session_state:
         st.session_state.pending_response = None
+    if "current_profile_id" not in st.session_state:
+        active_profile = get_active_profile()
+        st.session_state.current_profile_id = active_profile["id"] if active_profile else "default"
 
-    # Sidebar for document management
+    # Sidebar for profile selection and document management
     with st.sidebar:
+        # Profile Selection Section
+        st.markdown("""
+        <div style='padding: 1.5rem 1rem 1rem 1rem; background: #E8F5E8; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
+            <h2 style='color: #1B5E20; margin-bottom: 0.5rem;'>👤 Profile Selection</h2>
+            <p style='color: #388E3C; font-size: 1.05rem; margin-bottom: 1.2rem;'>Choose or create a profile to organize your documents and settings.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Get current profiles
+        profiles = get_profile_list()
+        active_profile = get_active_profile()
+        current_profile_name = active_profile["name"] if active_profile else "No Profile"
+        
+        # Profile selection dropdown
+        profile_names = [p["name"] for p in profiles]
+        
+        # Debug info
+        st.write(f"DEBUG: Found {len(profile_names)} profiles: {profile_names}")
+        st.write(f"DEBUG: Active profile: {current_profile_name}")
+        st.write(f"DEBUG: Active profile ID: {active_profile.get('id', 'unknown') if active_profile else 'None'}")
+        if active_profile:
+            st.write(f"DEBUG: Collection name: {active_profile.get('collection_name', 'unknown')}")
+        
+        # Show current index calculation
+        current_index = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
+        st.write(f"DEBUG: Current index for dropdown: {current_index}")
+        
+        # Add inline CSS for selectbox visibility
+        st.markdown("""
+        <style>
+        .stSelectbox label {
+            color: #1B5E20 !important;
+            font-weight: 600 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        selected_profile_name = st.selectbox(
+            "Select Profile",
+            profile_names,
+            index=current_index,
+            key="profile_selector_v2",
+            help="Choose which profile to use for this session"
+        )
+        
+        # Update active profile if selection changed
+        if selected_profile_name != current_profile_name:
+            selected_profile = next((p for p in profiles if p["name"] == selected_profile_name), None)
+            if selected_profile:
+                set_active_profile(selected_profile["id"])
+                st.session_state.qa_chain = None  # Reset QA chain for new profile
+                st.session_state.messages = []    # Clear chat history for new profile
+                st.session_state.pending_response = None
+                st.session_state.current_profile_id = selected_profile["id"]
+                st.rerun()
+        
+        # Create new profile section
+        with st.expander("➕ Create New Profile"):
+            new_profile_name = st.text_input("Profile Name", placeholder="Enter profile name...")
+            if st.button("Create Profile") and new_profile_name.strip():
+                if new_profile_name.strip() not in [p["name"] for p in profiles]:
+                    new_profile = create_profile(new_profile_name.strip())
+                    set_active_profile(new_profile["id"])
+                    st.session_state.qa_chain = None
+                    st.session_state.messages = []
+                    st.session_state.pending_response = None
+                    st.session_state.current_profile_id = new_profile["id"]
+                    st.success(f"Profile '{new_profile_name}' created!")
+                    st.rerun()
+                else:
+                    st.error("Profile name already exists!")
+
         st.markdown("""
         <div style='padding: 1.5rem 1rem 1rem 1rem; background: #C8E6C9; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
             <h2 style='color: #1B5E20; margin-bottom: 0.5rem;'>📚 Workshop Materials</h2>
@@ -645,11 +1084,12 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         doc_list = get_document_list()
+        st.write(f"DEBUG: Documents in current profile: {doc_list}")
         if doc_list:
             for doc in doc_list:
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.markdown(f"<span style='color:#1B5E20;font-weight:500;'>• {doc}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background-color:white; color:#1B5E20; font-weight:500; padding:0.5rem; border-radius:4px; margin-bottom:0.5rem; border-left:3px solid #4CAF50;'>📄 {doc}</div>", unsafe_allow_html=True)
                 with col2:
                     if st.button("Delete", key=f"delete_{doc}"):
                         with st.spinner(f"Deleting '{doc}'..."):
@@ -658,7 +1098,7 @@ def main():
                             st.success(f"Document '{doc}' deleted.")
                             st.rerun()
         else:
-            st.markdown("<span style='color:#888;'>No materials in the library.</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color:white; background-color:rgba(255,255,255,0.1); padding:0.5rem; border-radius:4px; display:block;'>No materials in the library.</span>", unsafe_allow_html=True)
 
         st.markdown("""
         <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>
@@ -669,8 +1109,17 @@ def main():
             reset_vector_store()
             st.session_state.qa_chain = None
             st.session_state.messages = []
+            st.session_state.pending_response = None
             st.success("All workshop materials have been removed!")
             st.rerun()
+            
+        # Show current profile info
+        st.markdown(f"""
+        <div style='background: #E8F5E8; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-top: 1rem;'>
+            <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>🎯 Active Profile</h4>
+            <p style='color: #1B5E20; font-weight: 500;'>{current_profile_name}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Check if vector store exists and set up QA chain if needed
     if not st.session_state.qa_chain and get_document_list():
@@ -835,6 +1284,9 @@ def main():
                 st.rerun()
 
 def save_feedback(question, answer, sources, helpful):
+    active_profile = get_active_profile()
+    feedback_file = active_profile.get("feedback_file", FEEDBACK_FILE) if active_profile else FEEDBACK_FILE
+    
     feedback_entry = {
         "question": question,
         "answer": answer,
@@ -842,8 +1294,8 @@ def save_feedback(question, answer, sources, helpful):
         "helpful": helpful
     }
     try:
-        if os.path.exists(FEEDBACK_FILE):
-            with open(FEEDBACK_FILE, "r") as f:
+        if os.path.exists(feedback_file):
+            with open(feedback_file, "r") as f:
                 data = json.load(f)
         else:
             data = []
@@ -852,9 +1304,9 @@ def save_feedback(question, answer, sources, helpful):
         data = []
     data.append(feedback_entry)
     try:
-        with open(FEEDBACK_FILE, "w") as f:
+        with open(feedback_file, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"Feedback saved to {FEEDBACK_FILE}")
+        print(f"Feedback saved to {feedback_file}")
     except Exception as e:
         print(f"Error saving feedback: {str(e)}")
 
