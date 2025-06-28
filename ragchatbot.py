@@ -21,6 +21,7 @@ COLLECTION_NAME = "rag_documents"
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 FEEDBACK_FILE = "feedback.json"
+PROFILES_FILE = "profiles.json"
 
 # --- File Processing ---
 def process_file(uploaded_file):
@@ -56,11 +57,15 @@ def get_or_create_vector_store():
     # Initialize the embeddings
     embeddings = get_embeddings()
     
+    # Get active profile's collection name
+    active_profile = get_active_profile()
+    collection_name = active_profile.get("collection_name", COLLECTION_NAME) if active_profile else COLLECTION_NAME
+    
     # Get or create the vector store
     vector_store = Chroma(
         persist_directory=PERSIST_DIRECTORY,
         embedding_function=embeddings,
-        collection_name=COLLECTION_NAME
+        collection_name=collection_name
     )
     
     return vector_store
@@ -109,11 +114,87 @@ def delete_document_from_vector_store(filename):
     vector_store.delete(where={"source": filename})
     return vector_store
 
-# Helper: Load feedback
-def load_feedback():
-    if os.path.exists(FEEDBACK_FILE):
+# --- Profile Management ---
+def load_profiles():
+    if os.path.exists(PROFILES_FILE):
         try:
-            with open(FEEDBACK_FILE, "r") as f:
+            with open(PROFILES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return create_default_profiles()
+    else:
+        return create_default_profiles()
+
+def create_default_profiles():
+    default_profiles = {
+        "profiles": [
+            {
+                "id": "default",
+                "name": "Workshop Facilitator",
+                "system_prompt": "default",
+                "feedback_file": "feedback.json",
+                "collection_name": "rag_documents",
+                "created_at": "2025-06-28T00:00:00Z",
+                "is_default": True
+            }
+        ],
+        "active_profile": "default"
+    }
+    save_profiles(default_profiles)
+    return default_profiles
+
+def save_profiles(profiles_data):
+    try:
+        with open(PROFILES_FILE, "w") as f:
+            json.dump(profiles_data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving profiles: {str(e)}")
+
+def get_active_profile():
+    profiles_data = load_profiles()
+    active_id = profiles_data.get("active_profile", "default")
+    for profile in profiles_data["profiles"]:
+        if profile["id"] == active_id:
+            return profile
+    return profiles_data["profiles"][0] if profiles_data["profiles"] else None
+
+def create_profile(name, system_prompt="default"):
+    profiles_data = load_profiles()
+    new_id = f"profile_{len(profiles_data['profiles'])}"
+    
+    new_profile = {
+        "id": new_id,
+        "name": name,
+        "system_prompt": system_prompt,
+        "feedback_file": f"feedback_{new_id}.json",
+        "collection_name": f"rag_documents_{new_id}",
+        "created_at": f"{str(uuid.uuid4())}",
+        "is_default": False
+    }
+    
+    profiles_data["profiles"].append(new_profile)
+    save_profiles(profiles_data)
+    return new_profile
+
+def set_active_profile(profile_id):
+    profiles_data = load_profiles()
+    profiles_data["active_profile"] = profile_id
+    save_profiles(profiles_data)
+
+def get_profile_list():
+    profiles_data = load_profiles()
+    return profiles_data["profiles"]
+
+# Helper: Load feedback (updated to use active profile)
+def load_feedback():
+    active_profile = get_active_profile()
+    if not active_profile:
+        return []
+        
+    feedback_file = active_profile.get("feedback_file", FEEDBACK_FILE)
+    if os.path.exists(feedback_file):
+        try:
+            with open(feedback_file, "r") as f:
                 return json.load(f)
         except Exception:
             return []
@@ -197,7 +278,7 @@ class CustomRAGChain:
     
     def __init__(self, vector_store, model_name="compound-beta-mini", api_key=None, 
                  temperature=1.0, max_tokens=1024, top_p=1.0, prompt_adaptation=None, 
-                 retrieval_boosts=None):
+                 retrieval_boosts=None, system_prompt_template=None):
         """Initialize the custom RAG chain."""
         # Initialize the Groq API client
         self.groq_client = SimpleGroqAPI(
@@ -213,10 +294,13 @@ class CustomRAGChain:
         if retrieval_boosts:
             self.retriever.search_kwargs["custom_boosts"] = retrieval_boosts
             
-        # Prepare the prompt template
+        # Use the provided system prompt template or default
+        self.prompt_template = system_prompt_template or self._get_default_prompt_template(prompt_adaptation)
+    
+    def _get_default_prompt_template(self, prompt_adaptation=None):
+        """Get the default system prompt template."""
         adaptation_text = prompt_adaptation or ""
-        # Use double curly braces to escape the placeholders for format() method
-        self.prompt_template = f"""
+        return f"""
         You are a thoughtful workshop facilitator who helps educators by answering questions about teaching techniques, facilitation strategies, and workshop content.
         
         The messagepairs.pdf document contains examples of the tone and style you should use - it's a guide for HOW to answer, not a reference to previous conversations. Use these as models for your responses, adopting their conversational, reflective approach.
@@ -299,12 +383,82 @@ class CustomRAGChain:
             "source_documents": docs
         }
 
+def get_system_prompt_template(active_profile, prompt_adaptation=None):
+    """Get the system prompt template based on the active profile."""
+    # For now, we'll use the default system prompt for all profiles
+    # In the future, this can be expanded to support custom prompts per profile
+    system_prompt = active_profile.get("system_prompt", "default") if active_profile else "default"
+    
+    adaptation_text = prompt_adaptation or ""
+    
+    # The default workshop facilitator prompt
+    if system_prompt == "default":
+        return f"""
+        You are a thoughtful workshop facilitator who helps educators by answering questions about teaching techniques, facilitation strategies, and workshop content.
+        
+        The messagepairs.pdf document contains examples of the tone and style you should use - it's a guide for HOW to answer, not a reference to previous conversations. Use these as models for your responses, adopting their conversational, reflective approach.
+        
+        {adaptation_text}
+        
+        Tone & Demeanor
+        • Warm, conversational, lightly informal; use contractions and everyday phrasing.
+        • Begin many replies with a brief, friendly cue ("Yeah," "Right," "So much to unpack here," "If I can chime in…") showing you've heard the speaker.
+        • Balance empathy with realism—validate feelings, then offer a measured perspective or gentle challenge.
+        • Keep sentences tight and readable; one or two concise paragraphs are usually enough.
+        
+        Content Moves
+        1. Acknowledge the main point or emotion you just heard.
+        2. Reflect with a short personal observation or relatable anecdote.
+        3. Extend the thinking—pose a question, highlight an implication, or surface a bigger idea that invites continued dialogue.
+        4. Avoid direct instruction unless explicitly requested; focus on perspective-sharing.
+        
+        Language Guidelines
+        • Use plain verbs over jargon; vary sentence length for an easy cadence.
+        • Sound curious, not prescriptive—phrases like "I'm not sure," "It seems to me," or "Maybe it's worth asking…" fit well.
+        • Refrain from over-praising; instead, show authentic interest ("That distinction is intriguing," rather than "Great point!").
+        
+        Example Skeleton
+        "Yeah, I felt the same pressure growing up. It's funny how comfortable a rigid routine can feel, even when it stifles creativity. Makes me think about how we might slowly shift that comfort toward curiosity without overwhelming everyone at once."
+        
+        Important: When responding to questions about messagepairs.pdf, understand that this document contains example responses that show the STYLE and TONE you should use. Do not treat these as actual conversations or previous interactions with the user. They are templates for how to craft your responses.
+        
+        Model your response style after these examples (but remember these are just style examples, not actual prior conversations):
+        "Very well said. If the skills we need to be successful change over time, than shouldn't what we teach and how we teach it change as well?"
+        "I love this. This is absolutely what we should aspire for, but I'll remind you that you absolutely deserve work-life balance as well and getting a little better each year is absolutely acceptable. You don't need immediate and complete change."
+        "What you're doing with MVP sounds great. Yes, intellectual autonomy is one of those things that no one really talks about, but once you are aware of it, you realize how important it is for society to function properly."
+        "Thanks for sharing your thoughts. Your question about scaffolding is really thoughtful. It reminds me of some great resources on this topic like Robert Kaplinsky's work on scaffolding approaches."
+        "That's an interesting perspective on structured approaches. When thinking about techniques like CUBES, it's worth considering the balance between structure and flexibility."
+        "Pre-mortems can definitely help with classroom management as well as with other aspects of teaching workshops."
+        
+        You are a workshop facilitator that provides information based on the documents uploaded to your knowledge base. 
+        
+        IMPORTANT RULES:
+        1. Use the information in the provided context to answer the question.
+        2. If the context doesn't contain the information needed to answer the question, respond in the same warm, conversational, and reflective tone—acknowledge the question, gently note that the workshop materials don't cover that specific topic, and suggest the user might want to explore this in a future workshop.
+        3. DO NOT use external knowledge beyond what's in the workshop materials.
+        4. DO NOT hallucinate details that aren't explicitly in the context.
+        5. When referring to specific concepts from the materials, mention which workshop or document it comes from.
+        6. Use examples and quotes from the workshop materials where helpful.
+        7. REMEMBER: Any references to "messagepairs.pdf" are only examples of STYLE and TONE - not actual previous conversations.
+        
+        Context: {{context}}
+        Question: {{question}}
+        
+        Answer (using ONLY information from the provided context):
+        """
+    else:
+        # For custom system prompts in the future
+        return system_prompt
+
 def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None):
     """Set up the custom RAG chain."""
     print("Setting up RAG chain")
     try:
         # Get API key from environment
         api_key = os.getenv("GROQ_API_KEY", "")
+        
+        # Get the active profile to determine system prompt
+        active_profile = get_active_profile()
         
         return CustomRAGChain(
             vector_store=vector_store,
@@ -314,7 +468,8 @@ def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None)
             max_tokens=1024,
             top_p=1.0,
             prompt_adaptation=prompt_adaptation,
-            retrieval_boosts=retrieval_boosts
+            retrieval_boosts=retrieval_boosts,
+            system_prompt_template=get_system_prompt_template(active_profile, prompt_adaptation)
         )
     except ValueError as e:
         st.error(str(e))
@@ -408,6 +563,35 @@ def main():
         border-radius: 6px;
         color: var(--text-color) !important;
         background-color: var(--background-white) !important;
+    }
+    
+    /* Selectbox styling */
+    .stSelectbox > div > div > select,
+    .stSelectbox > div > div > div {
+        color: var(--text-color) !important;
+        background-color: var(--background-white) !important;
+        border-color: var(--accent-color) !important;
+    }
+    
+    /* Selectbox dropdown options */
+    .stSelectbox [data-baseweb="select"] > div {
+        background-color: var(--background-white) !important;
+        color: var(--text-color) !important;
+    }
+    
+    /* Selectbox dropdown menu */
+    .stSelectbox [data-baseweb="menu"] {
+        background-color: var(--background-white) !important;
+    }
+    
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"] {
+        background-color: var(--background-white) !important;
+        color: var(--text-color) !important;
+    }
+    
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"]:hover {
+        background-color: var(--primary-light) !important;
+        color: var(--text-color) !important;
     }
     
     /* Heading styles */
@@ -613,9 +797,61 @@ def main():
         st.session_state.messages = []
     if "pending_response" not in st.session_state:
         st.session_state.pending_response = None
+    if "current_profile_id" not in st.session_state:
+        active_profile = get_active_profile()
+        st.session_state.current_profile_id = active_profile["id"] if active_profile else "default"
 
-    # Sidebar for document management
+    # Sidebar for profile selection and document management
     with st.sidebar:
+        # Profile Selection Section
+        st.markdown("""
+        <div style='padding: 1.5rem 1rem 1rem 1rem; background: #E8F5E8; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
+            <h2 style='color: #1B5E20; margin-bottom: 0.5rem;'>👤 Profile Selection</h2>
+            <p style='color: #388E3C; font-size: 1.05rem; margin-bottom: 1.2rem;'>Choose or create a profile to organize your documents and settings.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Get current profiles
+        profiles = get_profile_list()
+        active_profile = get_active_profile()
+        current_profile_name = active_profile["name"] if active_profile else "No Profile"
+        
+        # Profile selection dropdown
+        profile_names = [p["name"] for p in profiles]
+        selected_profile_name = st.selectbox(
+            "Select Profile",
+            profile_names,
+            index=profile_names.index(current_profile_name) if current_profile_name in profile_names else 0,
+            key="profile_selector"
+        )
+        
+        # Update active profile if selection changed
+        if selected_profile_name != current_profile_name:
+            selected_profile = next((p for p in profiles if p["name"] == selected_profile_name), None)
+            if selected_profile:
+                set_active_profile(selected_profile["id"])
+                st.session_state.qa_chain = None  # Reset QA chain for new profile
+                st.session_state.messages = []    # Clear chat history for new profile
+                st.session_state.pending_response = None
+                st.session_state.current_profile_id = selected_profile["id"]
+                st.rerun()
+        
+        # Create new profile section
+        with st.expander("➕ Create New Profile"):
+            new_profile_name = st.text_input("Profile Name", placeholder="Enter profile name...")
+            if st.button("Create Profile") and new_profile_name.strip():
+                if new_profile_name.strip() not in [p["name"] for p in profiles]:
+                    new_profile = create_profile(new_profile_name.strip())
+                    set_active_profile(new_profile["id"])
+                    st.session_state.qa_chain = None
+                    st.session_state.messages = []
+                    st.session_state.pending_response = None
+                    st.session_state.current_profile_id = new_profile["id"]
+                    st.success(f"Profile '{new_profile_name}' created!")
+                    st.rerun()
+                else:
+                    st.error("Profile name already exists!")
+
         st.markdown("""
         <div style='padding: 1.5rem 1rem 1rem 1rem; background: #C8E6C9; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
             <h2 style='color: #1B5E20; margin-bottom: 0.5rem;'>📚 Workshop Materials</h2>
@@ -669,8 +905,17 @@ def main():
             reset_vector_store()
             st.session_state.qa_chain = None
             st.session_state.messages = []
+            st.session_state.pending_response = None
             st.success("All workshop materials have been removed!")
             st.rerun()
+            
+        # Show current profile info
+        st.markdown(f"""
+        <div style='background: #E8F5E8; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-top: 1rem;'>
+            <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>🎯 Active Profile</h4>
+            <p style='color: #1B5E20; font-weight: 500;'>{current_profile_name}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Check if vector store exists and set up QA chain if needed
     if not st.session_state.qa_chain and get_document_list():
@@ -835,6 +1080,9 @@ def main():
                 st.rerun()
 
 def save_feedback(question, answer, sources, helpful):
+    active_profile = get_active_profile()
+    feedback_file = active_profile.get("feedback_file", FEEDBACK_FILE) if active_profile else FEEDBACK_FILE
+    
     feedback_entry = {
         "question": question,
         "answer": answer,
@@ -842,8 +1090,8 @@ def save_feedback(question, answer, sources, helpful):
         "helpful": helpful
     }
     try:
-        if os.path.exists(FEEDBACK_FILE):
-            with open(FEEDBACK_FILE, "r") as f:
+        if os.path.exists(feedback_file):
+            with open(feedback_file, "r") as f:
                 data = json.load(f)
         else:
             data = []
@@ -852,9 +1100,9 @@ def save_feedback(question, answer, sources, helpful):
         data = []
     data.append(feedback_entry)
     try:
-        with open(FEEDBACK_FILE, "w") as f:
+        with open(feedback_file, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"Feedback saved to {FEEDBACK_FILE}")
+        print(f"Feedback saved to {feedback_file}")
     except Exception as e:
         print(f"Error saving feedback: {str(e)}")
 
