@@ -623,60 +623,99 @@ def main():
         background-color: var(--background-white) !important;
     }
     
-    /* Selectbox styling - comprehensive fix */
+    /* Selectbox styling - comprehensive fix with higher specificity */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
     .stSelectbox > div > div > select,
     .stSelectbox > div > div > div,
     .stSelectbox div[data-baseweb="select"],
     .stSelectbox div[data-baseweb="select"] > div {
-        color: var(--text-color) !important;
-        background-color: var(--background-white) !important;
+        color: #212121 !important;
+        background-color: white !important;
         border-color: var(--accent-color) !important;
     }
     
-    /* Selectbox control and value container */
+    /* Selectbox control and value container - force black text */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-control"],
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-control"] > div,
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="single-value"],
     .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"],
     .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"] > div,
     .stSelectbox [data-baseweb="select"] [data-baseweb="single-value"] {
-        color: var(--text-color) !important;
-        background-color: var(--background-white) !important;
+        color: #212121 !important;
+        background-color: white !important;
     }
     
     /* Selectbox placeholder */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="placeholder"],
     .stSelectbox [data-baseweb="select"] [data-baseweb="placeholder"] {
         color: #666666 !important;
-        background-color: var(--background-white) !important;
+        background-color: white !important;
     }
     
     /* Selectbox dropdown arrow */
+    div[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="select-dropdown"],
     .stSelectbox [data-baseweb="select"] [data-baseweb="select-dropdown"] {
-        color: var(--text-color) !important;
+        color: #212121 !important;
     }
     
     /* Selectbox dropdown menu */
+    div[data-testid="stSelectbox"] [data-baseweb="popover"] [data-baseweb="menu"],
+    div[data-testid="stSelectbox"] div[data-baseweb="menu"],
     .stSelectbox [data-baseweb="popover"] [data-baseweb="menu"],
     .stSelectbox div[data-baseweb="menu"] {
-        background-color: var(--background-white) !important;
+        background-color: white !important;
         border: 1px solid var(--accent-color) !important;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        z-index: 999999 !important;
     }
     
-    /* Selectbox menu items */
+    /* Extra targeting for dropdown visibility */
+    div[role="listbox"],
+    ul[role="listbox"],
+    [data-baseweb="popover"] {
+        background-color: white !important;
+        z-index: 999999 !important;
+    }
+    
+    /* Selectbox menu items - force black text */
+    div[data-testid="stSelectbox"] [data-baseweb="menu"] [data-baseweb="menu-item"],
+    div[data-testid="stSelectbox"] div[data-baseweb="menu-item"],
     .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"],
-    .stSelectbox div[data-baseweb="menu-item"] {
-        background-color: var(--background-white) !important;
-        color: var(--text-color) !important;
+    .stSelectbox div[data-baseweb="menu-item"],
+    div[role="option"],
+    li[role="option"],
+    [data-baseweb="menu-item"] {
+        background-color: white !important;
+        color: #212121 !important;
         padding: 8px 12px !important;
+        font-weight: 500 !important;
+        border-bottom: 1px solid #f0f0f0 !important;
     }
     
+    div[data-testid="stSelectbox"] [data-baseweb="menu"] [data-baseweb="menu-item"]:hover,
+    div[data-testid="stSelectbox"] div[data-baseweb="menu-item"]:hover,
     .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"]:hover,
-    .stSelectbox div[data-baseweb="menu-item"]:hover {
+    .stSelectbox div[data-baseweb="menu-item"]:hover,
+    div[role="option"]:hover,
+    li[role="option"]:hover,
+    [data-baseweb="menu-item"]:hover {
         background-color: var(--primary-light) !important;
-        color: var(--text-color) !important;
+        color: #212121 !important;
+        font-weight: 600 !important;
     }
     
-    /* Force text visibility */
+    /* Force all selectbox text to be visible */
+    div[data-testid="stSelectbox"] *,
     .stSelectbox * {
-        color: var(--text-color) !important;
+        color: #212121 !important;
+    }
+    
+    /* Override any inherited dark styles */
+    div[data-testid="stSelectbox"] span,
+    div[data-testid="stSelectbox"] div {
+        color: #212121 !important;
+        background-color: white !important;
     }
     
     /* Ensure all text inputs have visible black text */
@@ -963,8 +1002,13 @@ def main():
         # Debug info
         st.write(f"DEBUG: Found {len(profile_names)} profiles: {profile_names}")
         st.write(f"DEBUG: Active profile: {current_profile_name}")
+        st.write(f"DEBUG: Active profile ID: {active_profile.get('id', 'unknown') if active_profile else 'None'}")
         if active_profile:
             st.write(f"DEBUG: Collection name: {active_profile.get('collection_name', 'unknown')}")
+        
+        # Show current index calculation
+        current_index = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
+        st.write(f"DEBUG: Current index for dropdown: {current_index}")
         
         # Add inline CSS for selectbox visibility
         st.markdown("""
@@ -979,7 +1023,7 @@ def main():
         selected_profile_name = st.selectbox(
             "Select Profile",
             profile_names,
-            index=profile_names.index(current_profile_name) if current_profile_name in profile_names else 0,
+            index=current_index,
             key="profile_selector_v2",
             help="Choose which profile to use for this session"
         )
