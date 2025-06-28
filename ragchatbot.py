@@ -999,16 +999,8 @@ def main():
         # Profile selection dropdown
         profile_names = [p["name"] for p in profiles]
         
-        # Debug info
-        st.write(f"DEBUG: Found {len(profile_names)} profiles: {profile_names}")
-        st.write(f"DEBUG: Active profile: {current_profile_name}")
-        st.write(f"DEBUG: Active profile ID: {active_profile.get('id', 'unknown') if active_profile else 'None'}")
-        if active_profile:
-            st.write(f"DEBUG: Collection name: {active_profile.get('collection_name', 'unknown')}")
-        
-        # Show current index calculation
+        # Calculate current index for dropdown
         current_index = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
-        st.write(f"DEBUG: Current index for dropdown: {current_index}")
         
         # Add inline CSS for selectbox visibility
         st.markdown("""
@@ -1084,7 +1076,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         doc_list = get_document_list()
-        st.write(f"DEBUG: Documents in current profile: {doc_list}")
         if doc_list:
             for doc in doc_list:
                 col1, col2 = st.columns([4, 1])
