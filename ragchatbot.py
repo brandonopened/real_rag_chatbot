@@ -108,24 +108,44 @@ def add_document_to_vector_store(content, filename):
     return vector_store
 
 def get_document_list():
-    # Get the existing vector store
+    # Get the existing vector store for the active profile
     vector_store = get_or_create_vector_store()
     
-    # Get all documents
-    documents = vector_store.get()
-    
-    # Extract unique filenames
-    if documents and 'metadatas' in documents and documents['metadatas']:
-        sources = [doc.get('source', 'Unknown') for doc in documents['metadatas']]
-        return list(set(sources))  # Return unique sources
-    return []
+    try:
+        # Get all documents from the active profile's collection
+        documents = vector_store.get()
+        
+        # Extract unique filenames
+        if documents and 'metadatas' in documents and documents['metadatas']:
+            sources = [doc.get('source', 'Unknown') for doc in documents['metadatas']]
+            return list(set(sources))  # Return unique sources
+        return []
+    except Exception as e:
+        print(f"Error getting document list: {e}")
+        return []
 
 def reset_vector_store():
-    # Delete the persistence directory
-    if os.path.exists(PERSIST_DIRECTORY):
-        shutil.rmtree(PERSIST_DIRECTORY)
-    # Create a fresh vector store
-    return get_or_create_vector_store()
+    # Get the active profile to reset only its collection
+    active_profile = get_active_profile()
+    collection_name = active_profile.get("collection_name", COLLECTION_NAME) if active_profile else COLLECTION_NAME
+    
+    try:
+        # Get the vector store and delete all documents in the active profile's collection
+        vector_store = get_or_create_vector_store()
+        
+        # Get all document IDs in the collection
+        documents = vector_store.get()
+        if documents and 'ids' in documents and documents['ids']:
+            # Delete all documents by their IDs
+            vector_store.delete(ids=documents['ids'])
+        
+        return vector_store
+    except Exception as e:
+        print(f"Error resetting vector store: {e}")
+        # Fallback: delete the entire persistence directory if collection-specific reset fails
+        if os.path.exists(PERSIST_DIRECTORY):
+            shutil.rmtree(PERSIST_DIRECTORY)
+        return get_or_create_vector_store()
 
 def delete_document_from_vector_store(filename):
     vector_store = get_or_create_vector_store()
@@ -659,6 +679,36 @@ def main():
         color: var(--text-color) !important;
     }
     
+    /* Ensure all text inputs have visible black text */
+    input, textarea, [contenteditable] {
+        color: #212121 !important;
+    }
+    
+    /* Streamlit specific input styling */
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    input[type="text"],
+    input[type="number"],
+    textarea {
+        color: #212121 !important;
+        background-color: white !important;
+    }
+    
+    /* Text area content snippets - make text black */
+    .stTextArea textarea[disabled],
+    textarea[disabled] {
+        color: #212121 !important;
+        background-color: #f8f9fa !important;
+        opacity: 1 !important;
+    }
+    
+    /* All disabled text inputs should be readable */
+    input[disabled], textarea[disabled], [disabled] {
+        color: #212121 !important;
+        opacity: 1 !important;
+    }
+    
     /* Heading styles */
     h1, h2, h3 {
         color: var(--primary-dark) !important;
@@ -713,6 +763,23 @@ def main():
         color: var(--text-color) !important;
     }
     
+    /* Library materials text - ensure visibility */
+    .stSidebar span[style*="color:#1B5E20"] {
+        color: #1B5E20 !important;
+        font-weight: 500 !important;
+        background-color: white !important;
+        padding: 0.5rem !important;
+        border-radius: 4px !important;
+        display: block !important;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Sidebar content with dark backgrounds need white text */
+    .stSidebar div[style*="background"] span,
+    .stSidebar div[style*="color:#888"] {
+        color: white !important;
+    }
+    
     /* Chat message styling */
     .stChatMessage {
         background-color: var(--background-white) !important;
@@ -762,11 +829,20 @@ def main():
     
     /* Chat input text area */
     .stChatInputContainer textarea {
-        color: var(--text-color) !important;
+        color: #212121 !important;
         background-color: white !important;
         font-size: 1rem !important;
         line-height: 1.5 !important;
         padding: 0.5rem !important;
+    }
+    
+    /* Chat input - additional selectors for visibility */
+    div[data-testid="stChatInput"] textarea,
+    div[data-testid="stChatInput"] input,
+    .stChatInput textarea,
+    .stChatInput input {
+        color: #212121 !important;
+        background-color: white !important;
     }
     
     /* Chat input focus */
@@ -886,6 +962,9 @@ def main():
         
         # Debug info
         st.write(f"DEBUG: Found {len(profile_names)} profiles: {profile_names}")
+        st.write(f"DEBUG: Active profile: {current_profile_name}")
+        if active_profile:
+            st.write(f"DEBUG: Collection name: {active_profile.get('collection_name', 'unknown')}")
         
         # Add inline CSS for selectbox visibility
         st.markdown("""
@@ -961,11 +1040,12 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         doc_list = get_document_list()
+        st.write(f"DEBUG: Documents in current profile: {doc_list}")
         if doc_list:
             for doc in doc_list:
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.markdown(f"<span style='color:#1B5E20;font-weight:500;'>• {doc}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background-color:white; color:#1B5E20; font-weight:500; padding:0.5rem; border-radius:4px; margin-bottom:0.5rem; border-left:3px solid #4CAF50;'>📄 {doc}</div>", unsafe_allow_html=True)
                 with col2:
                     if st.button("Delete", key=f"delete_{doc}"):
                         with st.spinner(f"Deleting '{doc}'..."):
@@ -974,7 +1054,7 @@ def main():
                             st.success(f"Document '{doc}' deleted.")
                             st.rerun()
         else:
-            st.markdown("<span style='color:#888;'>No materials in the library.</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color:white; background-color:rgba(255,255,255,0.1); padding:0.5rem; border-radius:4px; display:block;'>No materials in the library.</span>", unsafe_allow_html=True)
 
         st.markdown("""
         <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>
