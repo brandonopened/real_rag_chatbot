@@ -1,4 +1,13 @@
 import streamlit as st
+import warnings
+import os
+import sys
+
+# Suppress PyTorch warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*torch.classes.*")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 # Remove reference to RetrievalQA since we're using our own implementation
@@ -7,7 +16,6 @@ from langchain_core.prompts import PromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import Any, Dict, List, Optional, Sequence, Union, Callable
 from PyPDF2 import PdfReader
-import os
 import uuid
 import shutil
 import json
@@ -48,7 +56,18 @@ def split_text(text):
 
 # --- Vector Store Setup ---
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    try:
+        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    except Exception as e:
+        print(f"Warning: Could not load HuggingFace embeddings: {e}")
+        # Try fallback
+        try:
+            import warnings
+            warnings.filterwarnings("ignore")
+            return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        except Exception as e2:
+            print(f"Error: Could not load embeddings with fallback: {e2}")
+            raise e2
 
 def get_or_create_vector_store():
     # Create directory for persistence
@@ -201,11 +220,30 @@ def load_feedback():
     return []
 
 # Helper: Compute embedding similarity
-EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+def get_embed_model():
+    try:
+        return SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception as e:
+        print(f"Warning: Could not load SentenceTransformer: {e}")
+        return None
+
+EMBED_MODEL = None
+
 def question_similarity(q1, q2):
-    emb1 = EMBED_MODEL.encode([q1])[0]
-    emb2 = EMBED_MODEL.encode([q2])[0]
-    return float(np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2)))
+    global EMBED_MODEL
+    if EMBED_MODEL is None:
+        EMBED_MODEL = get_embed_model()
+    
+    if EMBED_MODEL is None:
+        return 0.0  # Fallback if model can't be loaded
+    
+    try:
+        emb1 = EMBED_MODEL.encode([q1])[0]
+        emb2 = EMBED_MODEL.encode([q2])[0]
+        return float(np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2)))
+    except Exception as e:
+        print(f"Warning: Could not compute similarity: {e}")
+        return 0.0
 
 class GroqLLM:
     def __init__(self, model="qwen-qwq-32b", api_key=None, temperature=0.6, max_tokens=4096, top_p=0.95):
@@ -565,32 +603,59 @@ def main():
         background-color: var(--background-white) !important;
     }
     
-    /* Selectbox styling */
+    /* Selectbox styling - comprehensive fix */
     .stSelectbox > div > div > select,
-    .stSelectbox > div > div > div {
+    .stSelectbox > div > div > div,
+    .stSelectbox div[data-baseweb="select"],
+    .stSelectbox div[data-baseweb="select"] > div {
         color: var(--text-color) !important;
         background-color: var(--background-white) !important;
         border-color: var(--accent-color) !important;
     }
     
-    /* Selectbox dropdown options */
-    .stSelectbox [data-baseweb="select"] > div {
+    /* Selectbox control and value container */
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"],
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-control"] > div,
+    .stSelectbox [data-baseweb="select"] [data-baseweb="single-value"] {
+        color: var(--text-color) !important;
         background-color: var(--background-white) !important;
+    }
+    
+    /* Selectbox placeholder */
+    .stSelectbox [data-baseweb="select"] [data-baseweb="placeholder"] {
+        color: #666666 !important;
+        background-color: var(--background-white) !important;
+    }
+    
+    /* Selectbox dropdown arrow */
+    .stSelectbox [data-baseweb="select"] [data-baseweb="select-dropdown"] {
         color: var(--text-color) !important;
     }
     
     /* Selectbox dropdown menu */
-    .stSelectbox [data-baseweb="menu"] {
+    .stSelectbox [data-baseweb="popover"] [data-baseweb="menu"],
+    .stSelectbox div[data-baseweb="menu"] {
         background-color: var(--background-white) !important;
+        border: 1px solid var(--accent-color) !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
     }
     
-    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"] {
+    /* Selectbox menu items */
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"],
+    .stSelectbox div[data-baseweb="menu-item"] {
         background-color: var(--background-white) !important;
+        color: var(--text-color) !important;
+        padding: 8px 12px !important;
+    }
+    
+    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"]:hover,
+    .stSelectbox div[data-baseweb="menu-item"]:hover {
+        background-color: var(--primary-light) !important;
         color: var(--text-color) !important;
     }
     
-    .stSelectbox [data-baseweb="menu"] [data-baseweb="menu-item"]:hover {
-        background-color: var(--primary-light) !important;
+    /* Force text visibility */
+    .stSelectbox * {
         color: var(--text-color) !important;
     }
     
@@ -818,11 +883,26 @@ def main():
         
         # Profile selection dropdown
         profile_names = [p["name"] for p in profiles]
+        
+        # Debug info
+        st.write(f"DEBUG: Found {len(profile_names)} profiles: {profile_names}")
+        
+        # Add inline CSS for selectbox visibility
+        st.markdown("""
+        <style>
+        .stSelectbox label {
+            color: #1B5E20 !important;
+            font-weight: 600 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
         selected_profile_name = st.selectbox(
             "Select Profile",
             profile_names,
             index=profile_names.index(current_profile_name) if current_profile_name in profile_names else 0,
-            key="profile_selector"
+            key="profile_selector_v2",
+            help="Choose which profile to use for this session"
         )
         
         # Update active profile if selection changed
