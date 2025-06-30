@@ -552,8 +552,6 @@ class CustomRAGChain:
 
 def get_system_prompt_template(active_profile, prompt_adaptation=None):
     """Get the system prompt template based on the active profile."""
-    # For now, we'll use the default system prompt for all profiles
-    # In the future, this can be expanded to support custom prompts per profile
     system_prompt = active_profile.get("system_prompt", "default") if active_profile else "default"
     
     adaptation_text = prompt_adaptation or ""
@@ -614,7 +612,20 @@ def get_system_prompt_template(active_profile, prompt_adaptation=None):
         Answer (using ONLY information from the provided context):
         """
     else:
-        # For custom system prompts in the future
+        # For custom system prompts, return the custom prompt directly
+        # Add adaptation text if provided
+        if adaptation_text:
+            # Insert adaptation text before the context/question placeholders
+            if "{context}" in system_prompt and "{question}" in system_prompt:
+                # Find the position before the context placeholder
+                context_pos = system_prompt.find("{context}")
+                if context_pos != -1:
+                    # Insert adaptation text before context
+                    system_prompt = system_prompt[:context_pos] + f"\n\n{adaptation_text}\n\n" + system_prompt[context_pos:]
+            else:
+                # If no placeholders found, append adaptation text
+                system_prompt += f"\n\n{adaptation_text}"
+        
         return system_prompt
 
 def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None):
@@ -1248,9 +1259,45 @@ def main():
         # Create new profile section
         with st.expander("➕ Create New Profile"):
             new_profile_name = st.text_input("Profile Name", placeholder="Enter profile name...")
+            
+            # System prompt selection
+            st.markdown("**System Prompt:**")
+            prompt_option = st.radio(
+                "Choose system prompt type:",
+                ["Use Default Workshop Facilitator", "Custom System Prompt"],
+                key="prompt_option"
+            )
+            
+            custom_prompt = ""
+            if prompt_option == "Custom System Prompt":
+                st.markdown("**Custom System Prompt Template:**")
+                st.markdown("""
+                Use `{context}` and `{question}` as placeholders in your prompt.
+                Example:
+                ```
+                You are a helpful assistant. Use the following context to answer the question.
+                
+                Context: {context}
+                Question: {question}
+                
+                Answer:
+                ```
+                """)
+                custom_prompt = st.text_area(
+                    "Enter your custom system prompt:",
+                    height=200,
+                    placeholder="You are a helpful assistant. Use the following context to answer the question.\n\nContext: {context}\nQuestion: {question}\n\nAnswer:"
+                )
+            
             if st.button("Create Profile") and new_profile_name.strip():
                 if new_profile_name.strip() not in [p["name"] for p in profiles]:
-                    new_profile = create_profile(new_profile_name.strip())
+                    # Determine system prompt
+                    if prompt_option == "Custom System Prompt" and custom_prompt.strip():
+                        system_prompt = custom_prompt.strip()
+                    else:
+                        system_prompt = "default"
+                    
+                    new_profile = create_profile(new_profile_name.strip(), system_prompt)
                     set_active_profile(new_profile["id"])
                     st.session_state.qa_chain = None
                     st.session_state.messages = []
