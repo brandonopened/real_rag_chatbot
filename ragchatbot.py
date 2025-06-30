@@ -444,8 +444,8 @@ class CustomRAGChain:
         
         # Set up the retriever
         self.retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-        if retrieval_boosts:
-            self.retriever.search_kwargs["custom_boosts"] = retrieval_boosts
+        # Store boosts for manual application during retrieval
+        self.retrieval_boosts = retrieval_boosts or {}
             
         # Use the provided system prompt template or default
         self.prompt_template = system_prompt_template or self._get_default_prompt_template(prompt_adaptation)
@@ -514,6 +514,15 @@ class CustomRAGChain:
         
         # Retrieve relevant documents
         docs = self.retriever.get_relevant_documents(query)
+        
+        # Apply retrieval boosts by reordering documents if boosts exist
+        if self.retrieval_boosts:
+            def get_boost_score(doc):
+                source = doc.metadata.get("source", "")
+                return self.retrieval_boosts.get(source, 0)
+            
+            # Sort documents by boost score (higher is better)
+            docs = sorted(docs, key=get_boost_score, reverse=True)
         
         # Extract context from documents
         context = "\n\n".join([doc.page_content for doc in docs])
