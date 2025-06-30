@@ -1439,8 +1439,8 @@ def main():
                         adaptation_notes.append(f"Answers from {src} have been found helpful. Prioritize clarity and directness when referencing this source.")
             # Compose adaptation note
             prompt_adaptation = "\n".join(set(adaptation_notes[-3:])) if adaptation_notes else ""
-            # Rebuild QA chain with adaptation and boosts
-            st.session_state.qa_chain = setup_rag_chain(get_or_create_vector_store(), prompt_adaptation=prompt_adaptation, retrieval_boosts=boosts if boosts else None)
+            # Rebuild QA chain with adaptation (temporarily disable boosts to fix error)
+            st.session_state.qa_chain = setup_rag_chain(get_or_create_vector_store(), prompt_adaptation=prompt_adaptation, retrieval_boosts=None)
 
             # Get response
             with st.spinner("Thinking..."):
