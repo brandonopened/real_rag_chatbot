@@ -442,8 +442,8 @@ class CustomRAGChain:
             top_p=top_p
         )
         
-        # Set up the retriever
-        self.retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        # Store the vector store directly instead of using as_retriever
+        self.vector_store = vector_store
         # Store boosts for manual application during retrieval
         self.retrieval_boosts = retrieval_boosts or {}
             
@@ -512,8 +512,13 @@ class CustomRAGChain:
         # Get the query from the query_dict
         query = query_dict.get("query", "")
         
-        # Retrieve relevant documents
-        docs = self.retriever.get_relevant_documents(query)
+        # Retrieve relevant documents using direct similarity search
+        try:
+            docs = self.vector_store.similarity_search(query, k=3)
+        except Exception as e:
+            print(f"Error in similarity search: {e}")
+            # Fallback to empty docs if search fails
+            docs = []
         
         # Apply retrieval boosts by reordering documents if boosts exist
         if self.retrieval_boosts:
