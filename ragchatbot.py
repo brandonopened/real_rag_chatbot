@@ -2,6 +2,8 @@ import streamlit as st
 import warnings
 import os
 import sys
+import bcrypt
+import datetime
 
 # Suppress PyTorch warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -30,6 +32,7 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 FEEDBACK_FILE = "feedback.json"
 PROFILES_FILE = "profiles.json"
+USERS_FILE = "users.json"
 
 # --- File Processing ---
 def process_file(uploaded_file):
@@ -152,6 +155,98 @@ def delete_document_from_vector_store(filename):
     # Chroma supports deletion by metadata filter (where clause)
     vector_store.delete(where={"source": filename})
     return vector_store
+
+# --- User Authentication ---
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify a password against its hash"""
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def load_users():
+    """Load users from file"""
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return create_default_users()
+    else:
+        return create_default_users()
+
+def create_default_users():
+    """Create default admin user"""
+    default_users = {
+        "admin": {
+            "password_hash": hash_password("admin123"),
+            "role": "admin",
+            "created_at": datetime.datetime.now().isoformat(),
+            "last_login": None
+        }
+    }
+    save_users(default_users)
+    return default_users
+
+def save_users(users_data):
+    """Save users to file"""
+    try:
+        with open(USERS_FILE, "w") as f:
+            json.dump(users_data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving users: {str(e)}")
+
+def authenticate_user(username: str, password: str) -> bool:
+    """Authenticate a user"""
+    users = load_users()
+    if username in users:
+        if verify_password(password, users[username]["password_hash"]):
+            # Update last login
+            users[username]["last_login"] = datetime.datetime.now().isoformat()
+            save_users(users)
+            return True
+    return False
+
+def create_user(username: str, password: str, role: str = "user") -> bool:
+    """Create a new user"""
+    users = load_users()
+    if username in users:
+        return False  # User already exists
+    
+    users[username] = {
+        "password_hash": hash_password(password),
+        "role": role,
+        "created_at": datetime.datetime.now().isoformat(),
+        "last_login": None
+    }
+    save_users(users)
+    return True
+
+def delete_user(username: str) -> bool:
+    """Delete a user (admin only)"""
+    if username == "admin":
+        return False  # Can't delete admin
+    
+    users = load_users()
+    if username in users:
+        del users[username]
+        save_users(users)
+        return True
+    return False
+
+def get_user_role(username: str) -> str:
+    """Get user role"""
+    users = load_users()
+    return users.get(username, {}).get("role", "user")
+
+def is_admin(username: str) -> bool:
+    """Check if user is admin"""
+    return get_user_role(username) == "admin"
+
+def get_all_users():
+    """Get all users (admin only)"""
+    return load_users()
 
 # --- Profile Management ---
 def load_profiles():
@@ -538,6 +633,85 @@ def setup_rag_chain(vector_store, prompt_adaptation=None, retrieval_boosts=None)
         print(traceback.format_exc())
         st.error(f"Error setting up RAG chain: {e}")
         return None
+
+# --- Authentication UI ---
+def show_login_page():
+    """Display login/register page"""
+    st.title("🌱 Grassroots Workshops Chatbot")
+    st.markdown("### Please log in to continue")
+    
+    tab1, tab2 = st.tabs(["Login", "Register"])
+    
+    with tab1:
+        st.subheader("Login")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        
+        if st.button("Login", key="login_button"):
+            if username and password:
+                if authenticate_user(username, password):
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.user_role = get_user_role(username)
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+            else:
+                st.error("Please enter both username and password")
+    
+    with tab2:
+        st.subheader("Register")
+        new_username = st.text_input("Username", key="register_username")
+        new_password = st.text_input("Password", type="password", key="register_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="confirm_password")
+        
+        if st.button("Register", key="register_button"):
+            if new_username and new_password and confirm_password:
+                if new_password != confirm_password:
+                    st.error("Passwords do not match")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters long")
+                elif create_user(new_username, new_password):
+                    st.success("Registration successful! Please log in.")
+                else:
+                    st.error("Username already exists")
+            else:
+                st.error("Please fill in all fields")
+
+def show_admin_panel():
+    """Display admin user management panel"""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👑 Admin Panel")
+    
+    users = get_all_users()
+    
+    # User list
+    with st.sidebar.expander("Manage Users"):
+        st.write("**Current Users:**")
+        for username, user_data in users.items():
+            role_icon = "👑" if user_data["role"] == "admin" else "👤"
+            st.write(f"{role_icon} {username} ({user_data['role']})")
+            
+            if username != "admin" and username != st.session_state.username:
+                if st.button(f"Delete {username}", key=f"delete_user_{username}"):
+                    if delete_user(username):
+                        st.success(f"User {username} deleted")
+                        st.rerun()
+        
+        # Create new user
+        st.write("**Create New User:**")
+        new_user = st.text_input("Username", key="admin_new_username")
+        new_pass = st.text_input("Password", type="password", key="admin_new_password")
+        new_role = st.selectbox("Role", ["user", "admin"], key="admin_new_role")
+        
+        if st.button("Create User", key="admin_create_user"):
+            if new_user and new_pass:
+                if create_user(new_user, new_pass, new_role):
+                    st.success(f"User {new_user} created")
+                    st.rerun()
+                else:
+                    st.error("Username already exists")
 
 # --- Streamlit App ---
 def main():
@@ -966,11 +1140,13 @@ def main():
     
     st.title("🌱 Grassroots Workshops Chatbot")
     
-    # Check for Groq API key in environment
-    if not os.getenv("GROQ_API_KEY"):
-        st.warning("⚠️ No Groq API key found. Please set the GROQ_API_KEY environment variable to use the chatbot.")
-
     # Initialize session state
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if "username" not in st.session_state:
+        st.session_state.username = None
+    if "user_role" not in st.session_state:
+        st.session_state.user_role = None
     if "qa_chain" not in st.session_state:
         st.session_state.qa_chain = None
     if "messages" not in st.session_state:
@@ -981,8 +1157,32 @@ def main():
         active_profile = get_active_profile()
         st.session_state.current_profile_id = active_profile["id"] if active_profile else "default"
 
+    # Check authentication
+    if not st.session_state.authenticated:
+        show_login_page()
+        return
+
+    # Check for Groq API key in environment
+    if not os.getenv("GROQ_API_KEY"):
+        st.warning("⚠️ No Groq API key found. Please set the GROQ_API_KEY environment variable to use the chatbot.")
+
     # Sidebar for profile selection and document management
     with st.sidebar:
+        # User info and logout
+        st.markdown(f"**Welcome, {st.session_state.username}!**")
+        role_icon = "👑" if st.session_state.user_role == "admin" else "👤"
+        st.markdown(f"{role_icon} Role: {st.session_state.user_role}")
+        
+        if st.button("🚪 Logout"):
+            st.session_state.authenticated = False
+            st.session_state.username = None
+            st.session_state.user_role = None
+            st.session_state.qa_chain = None
+            st.session_state.messages = []
+            st.session_state.pending_response = None
+            st.rerun()
+        
+        st.markdown("---")
         # Profile Selection Section
         st.markdown("""
         <div style='padding: 1.5rem 1rem 1rem 1rem; background: #E8F5E8; border-radius: 12px; box-shadow: 0 2px 8px rgba(56,142,60,0.08); margin-bottom: 1.5rem;'>
@@ -1111,6 +1311,10 @@ def main():
             <p style='color: #1B5E20; font-weight: 500;'>{current_profile_name}</p>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Show admin panel if user is admin
+        if st.session_state.user_role == "admin":
+            show_admin_panel()
 
     # Check if vector store exists and set up QA chain if needed
     if not st.session_state.qa_chain and get_document_list():
