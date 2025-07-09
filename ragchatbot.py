@@ -1393,28 +1393,59 @@ def main():
             # Feedback buttons for assistant responses
             if message["role"] == "assistant":
                 feedback_key = f"feedback_{idx}"
+                comment_key = f"comment_{idx}"
                 if f"feedback_{idx}" not in st.session_state:
                     st.session_state[feedback_key] = None
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    if st.button("✅ Helpful", key=f"helpful_{idx}", help="This response was useful"):
-                        st.session_state[feedback_key] = True
-                with col2:
-                    if st.button("❌ Not Helpful", key=f"not_helpful_{idx}", help="This response was not useful"):
-                        st.session_state[feedback_key] = False
-                # Save feedback if just clicked
+                if f"comment_{idx}" not in st.session_state:
+                    st.session_state[comment_key] = ""
+                
+                # Show feedback buttons if not already given
+                if st.session_state[feedback_key] is None:
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        if st.button("👍", key=f"thumbs_up_{idx}", help="This response was helpful"):
+                            st.session_state[feedback_key] = True
+                    with col2:
+                        if st.button("👎", key=f"thumbs_down_{idx}", help="This response was not helpful"):
+                            st.session_state[feedback_key] = False
+                
+                # Show comment field and save button if feedback was given
                 if st.session_state[feedback_key] is not None and not message.get("feedback_saved"):
-                    # Find the previous user message for the question
-                    question = None
-                    for prev in reversed(st.session_state.messages[:idx]):
-                        if prev["role"] == "user":
-                            question = prev["content"]
-                            break
-                    # Get sources directly from message metadata if available
-                    sources = message.get("sources", [])
-                    save_feedback(question, message["content"], sources, st.session_state[feedback_key])
-                    message["feedback_saved"] = True
-                    st.success("Feedback saved!")
+                    st.markdown("---")
+                    st.markdown("**💬 Why did you give this feedback? (optional)**")
+                    comment = st.text_area(
+                        "Add a comment about this response...",
+                        key=f"comment_text_{idx}",
+                        placeholder="e.g., 'This was very clear and helpful' or 'This didn't answer my question'",
+                        height=80
+                    )
+                    
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        if st.button("💾 Save Feedback", key=f"save_feedback_{idx}"):
+                            # Find the previous user message for the question
+                            question = None
+                            for prev in reversed(st.session_state.messages[:idx]):
+                                if prev["role"] == "user":
+                                    question = prev["content"]
+                                    break
+                            # Get sources directly from message metadata if available
+                            sources = message.get("sources", [])
+                            save_feedback(question, message["content"], sources, st.session_state[feedback_key], comment)
+                            message["feedback_saved"] = True
+                            st.success("Feedback saved!")
+                            st.rerun()
+                    with col2:
+                        if st.button("🔄 Change Feedback", key=f"change_feedback_{idx}"):
+                            st.session_state[feedback_key] = None
+                            st.rerun()
+                
+                # Show feedback status if already saved
+                elif message.get("feedback_saved"):
+                    feedback_icon = "👍" if st.session_state[feedback_key] else "👎"
+                    feedback_text = "Helpful" if st.session_state[feedback_key] else "Not Helpful"
+                    st.markdown(f"---")
+                    st.markdown(f"**{feedback_icon} {feedback_text}** - Feedback saved")
 
     # Display pending response if available
     if st.session_state.pending_response:
@@ -1429,37 +1460,86 @@ def main():
                     st.markdown(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
                     st.text_area(f"Content snippet {i}", detail['snippet'], height=100, disabled=True)
         
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("✅ Approve & Share", key="approve_pending", help="Approve this response and add it to the chat"):
-                response = f"{st.session_state.pending_response['answer']}"
-                # Save the source details for feedback
-                sources = []
-                for i, detail in enumerate(st.session_state.pending_response['source_details'], 1):
-                    sources.append(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
-                # Find the last user question
-                question = None
-                for msg in reversed(st.session_state.messages):
-                    if msg["role"] == "user":
-                        question = msg["content"]
-                        break
-                # Save feedback as helpful
-                save_feedback(question, response, sources, True)
-                # Add to messages with source metadata
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": response,
-                    "sources": sources,
-                    "feedback_saved": True
-                })
-                st.success("Response approved and added to chat history!")
-                st.session_state.pending_response = None
-                st.rerun()
-        with col2:
-            if st.button("❌ Request New Response", key="reject_pending", help="Reject this response and ask a different question"):
-                st.session_state.pending_response = None
-                st.warning("Response rejected. You can now ask another question.")
-                st.rerun()
+        # Feedback section for pending response
+        st.markdown("---")
+        st.markdown("**💬 How was this response?**")
+        
+        # Initialize feedback state for pending response
+        if "pending_feedback" not in st.session_state:
+            st.session_state.pending_feedback = None
+        if "pending_comment" not in st.session_state:
+            st.session_state.pending_comment = ""
+        
+        # Show feedback buttons if not already given
+        if st.session_state.pending_feedback is None:
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("👍 Helpful", key="pending_thumbs_up", help="This response was helpful"):
+                    st.session_state.pending_feedback = True
+            with col2:
+                if st.button("👎 Not Helpful", key="pending_thumbs_down", help="This response was not helpful"):
+                    st.session_state.pending_feedback = False
+        
+        # Show comment field and action buttons if feedback was given
+        if st.session_state.pending_feedback is not None:
+            st.markdown("**💬 Why did you give this feedback? (optional)**")
+            comment = st.text_area(
+                "Add a comment about this response...",
+                key="pending_comment_text",
+                placeholder="e.g., 'This was very clear and helpful' or 'This didn't answer my question'",
+                height=80
+            )
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                if st.button("💾 Save & Approve", key="save_and_approve_pending", help="Save feedback and add response to chat"):
+                    response = f"{st.session_state.pending_response['answer']}"
+                    # Save the source details for feedback
+                    sources = []
+                    for i, detail in enumerate(st.session_state.pending_response['source_details'], 1):
+                        sources.append(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
+                    # Find the last user question
+                    question = None
+                    for msg in reversed(st.session_state.messages):
+                        if msg["role"] == "user":
+                            question = msg["content"]
+                            break
+                    # Save feedback
+                    save_feedback(question, response, sources, st.session_state.pending_feedback, comment)
+                    # Add to messages with source metadata
+                    st.session_state.messages.append({
+                        "role": "assistant", 
+                        "content": response,
+                        "sources": sources,
+                        "feedback_saved": True
+                    })
+                    st.success("Response approved and feedback saved!")
+                    st.session_state.pending_response = None
+                    st.session_state.pending_feedback = None
+                    st.rerun()
+            with col2:
+                if st.button("💾 Save & Reject", key="save_and_reject_pending", help="Save feedback and request new response"):
+                    response = f"{st.session_state.pending_response['answer']}"
+                    # Save the source details for feedback
+                    sources = []
+                    for i, detail in enumerate(st.session_state.pending_response['source_details'], 1):
+                        sources.append(f"**Source {i}:** {detail['source']} (chunk {detail['chunk']})")
+                    # Find the last user question
+                    question = None
+                    for msg in reversed(st.session_state.messages):
+                        if msg["role"] == "user":
+                            question = msg["content"]
+                            break
+                    # Save feedback
+                    save_feedback(question, response, sources, st.session_state.pending_feedback, comment)
+                    st.session_state.pending_response = None
+                    st.session_state.pending_feedback = None
+                    st.warning("Feedback saved. You can now ask another question.")
+                    st.rerun()
+            with col3:
+                if st.button("🔄 Change Feedback", key="change_pending_feedback", help="Change your feedback"):
+                    st.session_state.pending_feedback = None
+                    st.rerun()
     
     # Chat input - only show if documents exist and no pending response
     elif get_document_list() and st.session_state.qa_chain and not st.session_state.pending_response:
@@ -1539,7 +1619,7 @@ def main():
                 # Add to pending response for approval
                 st.rerun()
 
-def save_feedback(question, answer, sources, helpful):
+def save_feedback(question, answer, sources, helpful, comment=""):
     active_profile = get_active_profile()
     feedback_file = active_profile.get("feedback_file", FEEDBACK_FILE) if active_profile else FEEDBACK_FILE
     
@@ -1547,7 +1627,8 @@ def save_feedback(question, answer, sources, helpful):
         "question": question,
         "answer": answer,
         "sources": sources,
-        "helpful": helpful
+        "helpful": helpful,
+        "comment": comment
     }
     try:
         if os.path.exists(feedback_file):
