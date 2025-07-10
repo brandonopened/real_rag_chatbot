@@ -1163,8 +1163,6 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    st.title("🌱 Grassroots Workshops Chatbot")
-    
     # Initialize session state
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
