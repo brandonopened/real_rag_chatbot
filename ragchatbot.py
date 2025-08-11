@@ -8,7 +8,10 @@ import datetime
 # Suppress PyTorch warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
+warnings.filterwarnings("ignore", message=".*meta tensor.*")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -60,17 +63,30 @@ def split_text(text):
 # --- Vector Store Setup ---
 def get_embeddings():
     try:
-        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        # Try to load with device specification to avoid meta tensor issues
+        import torch
+        device = "cpu"  # Force CPU to avoid GPU meta tensor issues
+        return HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2",
+            model_kwargs={"device": device},
+            encode_kwargs={"device": device}
+        )
     except Exception as e:
-        print(f"Warning: Could not load HuggingFace embeddings: {e}")
-        # Try fallback
+        print(f"Warning: Could not load HuggingFace embeddings with device specification: {e}")
+        # Try fallback without device specification
         try:
             import warnings
             warnings.filterwarnings("ignore")
             return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         except Exception as e2:
             print(f"Error: Could not load embeddings with fallback: {e2}")
-            raise e2
+            # Try alternative model as last resort
+            try:
+                print("Trying alternative embedding model...")
+                return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            except Exception as e3:
+                print(f"Error: Could not load any embedding model: {e3}")
+                raise e3
 
 def get_or_create_vector_store():
     # Create directory for persistence
@@ -337,10 +353,24 @@ def load_feedback():
 # Helper: Compute embedding similarity
 def get_embed_model():
     try:
-        return SentenceTransformer("all-MiniLM-L6-v2")
+        # Try to load with device specification to avoid meta tensor issues
+        import torch
+        device = "cpu"  # Force CPU to avoid GPU meta tensor issues
+        return SentenceTransformer("all-MiniLM-L6-v2", device=device)
     except Exception as e:
-        print(f"Warning: Could not load SentenceTransformer: {e}")
-        return None
+        print(f"Warning: Could not load SentenceTransformer with device specification: {e}")
+        # Try fallback without device specification
+        try:
+            return SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception as e2:
+            print(f"Error: Could not load SentenceTransformer with fallback: {e2}")
+            # Try alternative model as last resort
+            try:
+                print("Trying alternative SentenceTransformer model...")
+                return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            except Exception as e3:
+                print(f"Error: Could not load any SentenceTransformer model: {e3}")
+                return None
 
 EMBED_MODEL = None
 
