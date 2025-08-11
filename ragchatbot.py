@@ -1318,16 +1318,26 @@ def main():
             <h4 style='color: #388E3C; margin-bottom: 0.5rem;'>📄 Add Workshop Materials</h4>
         </div>
         """, unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Upload workshop PDFs or notes", type=["txt", "pdf"])
-        if uploaded_file is not None:
-            if st.button("📥 Add to Library"):
-                content, filename = process_file(uploaded_file)
-                if content:
-                    with st.spinner("Processing document..."):
-                        vector_store = add_document_to_vector_store(content, filename)
+        uploaded_files = st.file_uploader("Upload workshop PDFs or notes", type=["txt", "pdf"], accept_multiple_files=True)
+        if uploaded_files:
+            if st.button("📥 Add All to Library"):
+                with st.spinner("Processing documents..."):
+                    success_count = 0
+                    for uploaded_file in uploaded_files:
+                        content, filename = process_file(uploaded_file)
+                        if content:
+                            vector_store = add_document_to_vector_store(content, filename)
+                            success_count += 1
+                    
+                    if success_count > 0:
                         st.session_state.qa_chain = setup_rag_chain(vector_store)
-                        st.success(f"Document '{filename}' added to the library!")
+                        if success_count == 1:
+                            st.success(f"1 document added to the library!")
+                        else:
+                            st.success(f"{success_count} documents added to the library!")
                         st.rerun()
+                    else:
+                        st.error("No documents were successfully processed.")
 
         st.markdown("""
         <div style='background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(56,142,60,0.05); margin-bottom: 1.5rem;'>

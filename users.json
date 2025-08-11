@@ -10,5 +10,17 @@
     "role": "user",
     "created_at": "2025-07-09T09:20:13.076667",
     "last_login": "2025-07-09T09:25:39.520096"
+  },
+  "test314": {
+    "password_hash": "$2b$12$TF0JJImebdvi5Geh0fJq6e0.9REoXIp29EWvn870T88A5IKU9IPX2",
+    "role": "user",
+    "created_at": "2025-08-10T17:08:14.892642",
+    "last_login": null
+  },
+  "testuser": {
+    "password_hash": "$2b$12$pzHj4Qe4Hv3cBGtq1A6/O.EkUhl22f11r1mEvBKvAoe23ZCSsYTMS",
+    "role": "user",
+    "created_at": "2025-08-10T17:08:32.678261",
+    "last_login": "2025-08-10T17:22:25.051861"
   }
 }
