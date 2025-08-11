@@ -9,9 +9,20 @@ import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
 warnings.filterwarnings("ignore", message=".*meta tensor.*")
+warnings.filterwarnings("ignore", message=".*device.*")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+
+# Set PyTorch to use CPU only
+try:
+    import torch
+    torch.set_default_device('cpu')
+    torch.set_default_dtype(torch.float32)
+except ImportError:
+    pass
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -66,27 +77,58 @@ def get_embeddings():
         # Try to load with device specification to avoid meta tensor issues
         import torch
         device = "cpu"  # Force CPU to avoid GPU meta tensor issues
-        return HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={"device": device},
-            encode_kwargs={"device": device}
-        )
+        
+        # Create a custom embedding class that handles device issues
+        class SafeHuggingFaceEmbeddings:
+            def __init__(self, model_name="all-MiniLM-L6-v2"):
+                import warnings
+                warnings.filterwarnings("ignore")
+                
+                # Try to load with explicit device handling
+                try:
+                    from sentence_transformers import SentenceTransformer
+                    self.model = SentenceTransformer(model_name)
+                    # Force CPU and avoid device transfer issues
+                    self.model.to("cpu")
+                except Exception as e:
+                    print(f"Warning: Could not load model with device handling: {e}")
+                    # Try alternative approach
+                    try:
+                        self.model = SentenceTransformer(model_name, device="cpu")
+                    except Exception as e2:
+                        print(f"Error: Could not load model: {e2}")
+                        raise e2
+                
+                self.model_name = model_name
+            
+            def embed_documents(self, texts):
+                try:
+                    embeddings = self.model.encode(texts, convert_to_tensor=False)
+                    return embeddings.tolist() if hasattr(embeddings, 'tolist') else embeddings
+                except Exception as e:
+                    print(f"Error in embed_documents: {e}")
+                    raise e
+            
+            def embed_query(self, text):
+                try:
+                    embedding = self.model.encode(text, convert_to_tensor=False)
+                    return embedding.tolist() if hasattr(embedding, 'tolist') else embedding
+                except Exception as e:
+                    print(f"Error in embed_query: {e}")
+                    raise e
+        
+        return SafeHuggingFaceEmbeddings("all-MiniLM-L6-v2")
+        
     except Exception as e:
-        print(f"Warning: Could not load HuggingFace embeddings with device specification: {e}")
-        # Try fallback without device specification
+        print(f"Error: Could not create safe embeddings: {e}")
+        # Final fallback to original HuggingFaceEmbeddings
         try:
             import warnings
             warnings.filterwarnings("ignore")
             return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         except Exception as e2:
-            print(f"Error: Could not load embeddings with fallback: {e2}")
-            # Try alternative model as last resort
-            try:
-                print("Trying alternative embedding model...")
-                return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-            except Exception as e3:
-                print(f"Error: Could not load any embedding model: {e3}")
-                raise e3
+            print(f"Error: Could not load any embedding model: {e2}")
+            raise e2
 
 def get_or_create_vector_store():
     # Create directory for persistence
@@ -356,21 +398,33 @@ def get_embed_model():
         # Try to load with device specification to avoid meta tensor issues
         import torch
         device = "cpu"  # Force CPU to avoid GPU meta tensor issues
-        return SentenceTransformer("all-MiniLM-L6-v2", device=device)
-    except Exception as e:
-        print(f"Warning: Could not load SentenceTransformer with device specification: {e}")
-        # Try fallback without device specification
+        
+        # Create a safe SentenceTransformer loader
         try:
-            return SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception as e2:
-            print(f"Error: Could not load SentenceTransformer with fallback: {e2}")
-            # Try alternative model as last resort
+            from sentence_transformers import SentenceTransformer
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+            # Force CPU and avoid device transfer issues
+            model.to("cpu")
+            return model
+        except Exception as e:
+            print(f"Warning: Could not load model with device handling: {e}")
+            # Try alternative approach
             try:
-                print("Trying alternative SentenceTransformer model...")
-                return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-            except Exception as e3:
-                print(f"Error: Could not load any SentenceTransformer model: {e3}")
-                return None
+                model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+                return model
+            except Exception as e2:
+                print(f"Error: Could not load model: {e2}")
+                # Try alternative model as last resort
+                try:
+                    print("Trying alternative SentenceTransformer model...")
+                    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
+                    return model
+                except Exception as e3:
+                    print(f"Error: Could not load any SentenceTransformer model: {e3}")
+                    return None
+    except Exception as e:
+        print(f"Error: Could not create safe embed model: {e}")
+        return None
 
 EMBED_MODEL = None
 
